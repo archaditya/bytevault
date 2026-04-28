@@ -1,17 +1,3 @@
-// Package config handles loading and parsing application configuration.
-//
-// HOW IT WORKS:
-// 1. We define a Config struct with nested structs for each config section
-// 2. We use Koanf to load values from .env file first, then override with
-//    actual environment variables (so production env vars win over .env file)
-// 3. We "unmarshal" (convert) the flat key-value pairs into our typed struct
-//
-// GO CONCEPTS IN THIS FILE:
-// - struct:      A custom data type that groups fields together (like a class without methods)
-// - pointer (*): References to memory addresses. *Config means "pointer to a Config"
-// - error:       Go functions return errors explicitly. No try/catch!
-// - :=           Short variable declaration. Go infers the type automatically.
-// - func():      Functions are first-class. We pass one to env.Provider as a callback.
 package config
 
 import (
@@ -24,21 +10,16 @@ import (
 	"github.com/knadh/koanf/v2"
 )
 
-// Config is the root configuration struct.
-// Each nested struct represents a config section.
-// The `koanf` tags tell Koanf which key maps to which field.
 type Config struct {
 	Server   ServerConfig   `koanf:"server"`
 	Database DatabaseConfig `koanf:"db"`
 	App      AppConfig      `koanf:"app"`
 }
 
-// ServerConfig holds HTTP server settings.
 type ServerConfig struct {
 	Port string `koanf:"port"`
 }
 
-// DatabaseConfig holds PostgreSQL connection settings.
 type DatabaseConfig struct {
 	Host     string `koanf:"host"`
 	Port     string `koanf:"port"`
@@ -48,17 +29,17 @@ type DatabaseConfig struct {
 	SSLMode  string `koanf:"sslmode"`
 }
 
-// DSN builds a PostgreSQL connection string from the config fields.
-// This is a METHOD on DatabaseConfig (notice the receiver `(d DatabaseConfig)`).
-// In Go, methods are just functions with a "receiver" — the struct they belong to.
-func (d DatabaseConfig) DSN() string {
+// DNS is a METHOD on DatabaseConfig.
+// (d DatabaseConfig) is the RECEIVER - it means "this function belongs to DatabseConfig"
+// It builds a PostgreSQL connection string like
+// postgres://user:password@host:port/dbname?sslmode=disable
+func (d DatabaseConfig) DNS() string {
 	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s", 
 		d.User, d.Password, d.Host, d.Port, d.Name, d.SSLMode,
 	)
 }
 
-// AppConfig holds general application settings.
 type AppConfig struct {
 	Env string `koanf:"env"`
 }
@@ -110,3 +91,4 @@ func Load() (*Config, error) {
 
 	return &cfg, nil
 }
+

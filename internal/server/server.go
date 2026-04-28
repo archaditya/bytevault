@@ -1,10 +1,3 @@
-// Package server sets up the Echo HTTP server and wires everything together.
-//
-// GO CONCEPTS IN THIS FILE:
-// - struct embedding:     Server struct holds an Echo instance and config
-// - constructor pattern:  New() function creates and configures the server
-// - method:               Start() is a method on the Server struct
-// - dependency injection: We pass config INTO the server (not global state)
 package server
 
 import (
@@ -15,72 +8,66 @@ import (
 	"github.com/adityakkpk/bytevault/internal/logger"
 )
 
-// Server wraps the Echo instance and holds all dependencies.
-// This is the heart of our application — it owns the HTTP server
-// and all the handlers/services that plug into it.
+// Server holds the Echo instance and all dependencies.
 type Server struct {
-	echo   *echo.Echo     // The Echo framework instance
-	config *config.Config // Application configuration
+	echo	*echo.Echo
+	config *config.Config
 }
 
-// New creates and configures a new Server instance.
-// This is where we:
-// 1. Create the Echo instance
-// 2. Add middleware (logging, recovery, CORS)
-// 3. Register routes
-// 4. Return the configured server
-func New(cfg *config.Config) *Server {
-	// Create a new Echo instance
+// New functon creates a server. This is a dependency injection:
+// pass the config in, rather than reading it from a global
+func New(cfg *config.Config) *Server{
 	e := echo.New()
-
-	// Hide Echo's default banner (the ASCII art logo)
 	e.HideBanner = true
 
-	// ---- MIDDLEWARE ----
-	// Middleware are functions that run BEFORE your handler.
-	// They form a chain: Request → Middleware1 → Middleware2 → Handler → Response
+	// Middleware = functions that run BEFORE handler
+	// Request → Recover → CORS → RequestID → Handler → Response
 
-	// Recover middleware catches panics and returns a 500 error
-	// instead of crashing the entire server.
-	e.Use(middleware.Recover())
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogStatus:   true,
+		LogURI:      true,
+		LogMethod:   true,
+		LogLatency:  true,
+		LogError:    true,
+		LogRemoteIP: true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			logger.Log.Info().
+				Int("status", v.Status).
+				Str("method", v.Method).
+				Str("uri", v.URI).
+				Str("ip", v.RemoteIP).
+				Str("latency", v.Latency.String()). 
+				Msg("request")
+			return nil
+		},
+	}))
 
-	// CORS middleware allows cross-origin requests (needed for frontend).
-	// In production, you'd restrict AllowOrigins to your frontend URL.
+	e.Use(middleware.Recover()) // Catches panics and return 500 error instead of crashing the server
+
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 	}))
 
-	// Request ID middleware adds a unique ID to each request.
-	// Useful for tracing requests across logs.
-	e.Use(middleware.RequestID())
+	e.Use(middleware.RequestID()) // Adds unique ID to each request
 
-	// Create our server instance
 	s := &Server{
-		echo:   e,
+		echo: e,
 		config: cfg,
 	}
 
-	// Register all routes
 	s.registerRoutes()
 
 	return s
 }
 
-// Start begins listening for HTTP requests on the configured port.
-// This method BLOCKS — it runs until the server is shut down.
 func (s *Server) Start() error {
 	port := s.config.Server.Port
 	if port == "" {
-		port = "8080" // Default port
+		port = "8080"
 	}
 
-	logger.Log.Info().
-		Str("port", port).
-		Str("env", s.config.App.Env).
-		Msg("🚀 ByteVault server starting")
+	logger.Log.Info().Str("port", port).Str("env", s.config.App.Env).Msg("🚀 ByteVault server starting")
 
-	// Start listening. The colon before port means "listen on all interfaces".
-	// e.g., ":8080" = listen on 0.0.0.0:8080
 	return s.echo.Start(":" + port)
 }
