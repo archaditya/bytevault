@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
@@ -10,13 +11,14 @@ import (
 
 // Server holds the Echo instance and all dependencies.
 type Server struct {
-	echo	*echo.Echo
+	echo   *echo.Echo
 	config *config.Config
+	db     *pgxpool.Pool
 }
 
 // New functon creates a server. This is a dependency injection:
 // pass the config in, rather than reading it from a global
-func New(cfg *config.Config) *Server{
+func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	e := echo.New()
 	e.HideBanner = true
 
@@ -36,7 +38,7 @@ func New(cfg *config.Config) *Server{
 				Str("method", v.Method).
 				Str("uri", v.URI).
 				Str("ip", v.RemoteIP).
-				Str("latency", v.Latency.String()). 
+				Str("latency", v.Latency.String()).
 				Msg("request")
 			return nil
 		},
@@ -52,8 +54,9 @@ func New(cfg *config.Config) *Server{
 	e.Use(middleware.RequestID()) // Adds unique ID to each request
 
 	s := &Server{
-		echo: e,
+		echo:   e,
 		config: cfg,
+		db:     db,
 	}
 
 	s.registerRoutes()

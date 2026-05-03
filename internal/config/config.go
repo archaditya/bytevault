@@ -14,6 +14,7 @@ type Config struct {
 	Server   ServerConfig   `koanf:"server"`
 	Database DatabaseConfig `koanf:"db"`
 	App      AppConfig      `koanf:"app"`
+	JWT      JWTConfig      `koanf:"jwt"`
 }
 
 type ServerConfig struct {
@@ -29,19 +30,25 @@ type DatabaseConfig struct {
 	SSLMode  string `koanf:"sslmode"`
 }
 
-// DNS is a METHOD on DatabaseConfig.
-// (d DatabaseConfig) is the RECEIVER - it means "this function belongs to DatabseConfig"
+// DSN (Data Source Name) is a METHOD on DatabaseConfig.
+// (d DatabaseConfig) is the RECEIVER - it means "this function belongs to DatabaseConfig"
 // It builds a PostgreSQL connection string like
 // postgres://user:password@host:port/dbname?sslmode=disable
-func (d DatabaseConfig) DNS() string {
+func (d DatabaseConfig) DSN() string {
 	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s", 
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		d.User, d.Password, d.Host, d.Port, d.Name, d.SSLMode,
 	)
 }
 
 type AppConfig struct {
 	Env string `koanf:"env"`
+}
+
+type JWTConfig struct {
+	Secret string `koanf:"secret"`
+	AccessExpiry string `koanf:"accessexpiry"`
+	RefreshExpiry string `koanf:"refreshexpiry"`
 }
 
 // Load reads configuration from .env file and environment variables.
@@ -91,4 +98,3 @@ func Load() (*Config, error) {
 
 	return &cfg, nil
 }
-
