@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/adityakkpk/bytevault/internal/handler"
+	"github.com/archaditya/bytevault/internal/handler"
 )
 
 // registerHealthRoutes adds system/infra routes.

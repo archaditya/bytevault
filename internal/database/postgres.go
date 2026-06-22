@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/adityakkpk/bytevault/internal/logger"
+	"github.com/archaditya/bytevault/internal/logger"
 )
 
 // New creates a PostgreSQL connection pool.
