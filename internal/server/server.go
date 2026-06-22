@@ -5,8 +5,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/adityakkpk/bytevault/internal/config"
-	"github.com/adityakkpk/bytevault/internal/logger"
+	"github.com/archaditya/bytevault/internal/config"
+	"github.com/archaditya/bytevault/internal/logger"
 )
 
 // Server holds the Echo instance and all dependencies.

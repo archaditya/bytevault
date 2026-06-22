@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/adityakkpk/bytevault/internal/service"
+	"github.com/archaditya/bytevault/internal/service"
 )
 
 type AuthHandler struct {
@@ -22,15 +22,14 @@ func NewAuthHandler(authservice *service.AuthService) *AuthHandler {
 // POST /api/v1/auth/register
 func (h *AuthHandler) Register(c echo.Context) error {
 	var req struct {
-		Email string `json:"email"`
-		Password string `json:"password"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
 		FirstName string `json:"first_name"`
-		LastName string `json:"last_name"`
+		LastName  string `json:"last_name"`
 	}
 
-	// Bind = parse JSON request body into our struct 
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error":"Invalid request body"})
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Invalid request body"})
 	}
 
 	if req.Email == "" || req.Password == "" {
@@ -40,9 +39,12 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Password must be at least 8 characters"})
 	}
 
-	user, tokens, err := h.authService.Register(c.Request().Context(), req.Email, req.Password, req.FirstName, req.LastName)
+	ip := c.RealIP()
+	ua := c.Request().UserAgent()
+
+	user, tokens, err := h.authService.Register(c.Request().Context(), req.Email, req.Password, req.FirstName, req.LastName, &ip, &ua)
 	if err != nil {
-		if errors.Is(err, service.ErrEmailExists){
+		if errors.Is(err, service.ErrEmailExists) {
 			return c.JSON(http.StatusConflict, map[string]any{"error": "Email already registered"})
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Registration failed"})

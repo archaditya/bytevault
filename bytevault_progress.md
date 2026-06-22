@@ -17,7 +17,7 @@
 | Logging | Zerolog |
 | Config | Koanf |
 | Migrations | Tern |
-| Module Path | `github.com/adityakkpk/bytevault` |
+| Module Path | `github.com/archaditya/bytevault` |
 
 ---
 

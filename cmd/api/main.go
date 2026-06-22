@@ -4,10 +4,10 @@ import (
 	"embed"
 	"os"
 
-	"github.com/adityakkpk/bytevault/internal/config"
-	"github.com/adityakkpk/bytevault/internal/database"
-	"github.com/adityakkpk/bytevault/internal/logger"
-	"github.com/adityakkpk/bytevault/internal/server"
+	"github.com/archaditya/bytevault/internal/config"
+	"github.com/archaditya/bytevault/internal/database"
+	"github.com/archaditya/bytevault/internal/logger"
+	"github.com/archaditya/bytevault/internal/server"
 )
 
 // WHAT IS //go:embed?

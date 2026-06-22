@@ -29,6 +29,9 @@ type User struct {
 	IsVerified bool      `json:"is_verified"`
 	Status     *string   `json:"status"`
 
+	RoleName    string          `json:"role"`
+	Permissions map[string]bool `json:"permissions,omitempty"`
+
 	CreatedBy  *string   `json:"-"`
 	UpdatedBy  *string   `json:"-"`
 	DeletedBy  *string   `json:"-"`

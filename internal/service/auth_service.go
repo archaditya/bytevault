@@ -12,46 +12,55 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/adityakkpk/bytevault/internal/config"
-	"github.com/adityakkpk/bytevault/internal/model"
-	"github.com/adityakkpk/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/config"
+	"github.com/archaditya/bytevault/internal/model"
+	"github.com/archaditya/bytevault/internal/repository"
 )
 
 var (
-	ErrEmailExists       = errors.New("email already registered")
+	ErrEmailExists        = errors.New("email already registered")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 )
 
-// TokenPair holds access + refresh tokens returned to client
+// TokenClaims holds the decoded JWT claims
+type TokenClaims struct {
+	UserID      string
+	Role        string
+	Permissions map[string]bool
+}
+
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresAt    int64  `json:"expires_at"`
 }
 
-// AuthService handles registration, login, token generation
 type AuthService struct {
-	userRepo    *repository.UserRepository
-	sessionRepo *repository.SessionRepository
-	jwtCfg      config.JWTConfig
+	userRepo     *repository.UserRepository
+	sessionRepo  *repository.SessionRepository
+	roleRepo     *repository.RoleRepository
+	activityRepo *repository.ActivityRepository
+	jwtCfg       config.JWTConfig
 }
 
 func NewAuthService(
 	userRepo *repository.UserRepository,
 	sessionRepo *repository.SessionRepository,
+	roleRepo *repository.RoleRepository,
+	activityRepo *repository.ActivityRepository,
 	jwtCfg config.JWTConfig,
 ) *AuthService {
 	return &AuthService{
-		userRepo:    userRepo,
-		sessionRepo: sessionRepo,
-		jwtCfg:      jwtCfg,
+		userRepo:     userRepo,
+		sessionRepo:  sessionRepo,
+		roleRepo:     roleRepo,
+		activityRepo: activityRepo,
+		jwtCfg:       jwtCfg,
 	}
 }
 
-// Register creates a new user and returns tokens
-func (s *AuthService) Register(ctx context.Context, email, password, firstName, lastName string) (*model.User, *TokenPair, error) {
-	// Check if email already taken (active user)
+func (s *AuthService) Register(ctx context.Context, email, password, firstName, lastName string, ip, ua *string) (*model.User, *TokenPair, error) {
 	_, err := s.userRepo.FindByEmail(ctx, email)
 	if err == nil {
 		return nil, nil, ErrEmailExists
@@ -60,18 +69,15 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 		return nil, nil, fmt.Errorf("failed to check email: %w", err)
 	}
 
-	// Hash password with bcrypt
-	// bcrypt.GenerateFromPassword takes []byte and a cost factor (14 = secure)
 	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 	hashedPassword := string(hashedBytes)
 
-	// Create user
 	user := &model.User{
-		Email:     email,
-		Password:  &hashedPassword,
+		Email:    email,
+		Password: &hashedPassword,
 		FirstName: &firstName,
 		LastName:  &lastName,
 	}
@@ -81,8 +87,25 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 		return nil, nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	// Generate tokens
-	tokens, err := s.createSession(ctx, created.ID, nil, nil)
+	// Auto-assign "user" role
+	defaultRole, err := s.roleRepo.FindByName(ctx, "user")
+	if err == nil {
+		s.roleRepo.AssignRoleToUser(ctx, created.ID, defaultRole.ID, nil)
+		created.RoleName = defaultRole.Name
+		created.Permissions = defaultRole.Permissions
+	}
+
+	// Log activity
+	s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &created.ID,
+		Action:       "user.register",
+		ResourceType: strPtr("user"),
+		ResourceID:   strPtr(created.ID),
+		IPAddress:    ip,
+		UserAgent:    ua,
+	})
+
+	tokens, err := s.createSession(ctx, created.ID, created.RoleName, created.Permissions, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -90,7 +113,6 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 	return created, tokens, nil
 }
 
-// Login verifies credentials and returns tokens
 func (s *AuthService) Login(ctx context.Context, email, password string, userAgent, ip *string) (*model.User, *TokenPair, error) {
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
@@ -100,17 +122,31 @@ func (s *AuthService) Login(ctx context.Context, email, password string, userAge
 		return nil, nil, err
 	}
 
-	// User has no password (OAuth-only user)
 	if user.Password == nil {
 		return nil, nil, ErrInvalidCredentials
 	}
 
-	// Compare password with bcrypt
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(password)); err != nil {
 		return nil, nil, ErrInvalidCredentials
 	}
 
-	tokens, err := s.createSession(ctx, user.ID, userAgent, ip)
+	// Get user's role and permissions
+	role, err := s.roleRepo.GetUserRole(ctx, user.ID)
+	if err == nil {
+		user.RoleName = role.Name
+		user.Permissions = role.Permissions
+	}
+
+	// Log activity
+	s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &user.ID,
+		Action:       "user.login",
+		ResourceType: strPtr("session"),
+		IPAddress:    ip,
+		UserAgent:    userAgent,
+	})
+
+	tokens, err := s.createSession(ctx, user.ID, user.RoleName, user.Permissions, userAgent, ip)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -118,9 +154,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string, userAge
 	return user, tokens, nil
 }
 
-// RefreshTokens generates new tokens from a valid refresh token
 func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*TokenPair, error) {
-	// Hash the token to look it up in DB
 	tokenHash := hashToken(refreshToken)
 
 	session, err := s.sessionRepo.FindByTokenHash(ctx, tokenHash)
@@ -131,16 +165,23 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 		return nil, err
 	}
 
-	// Check if expired
 	if time.Now().After(session.ExpiresAt) {
 		s.sessionRepo.DeleteByTokenHash(ctx, tokenHash)
 		return nil, ErrInvalidToken
 	}
 
-	// Delete old session, create new one
 	s.sessionRepo.DeleteByTokenHash(ctx, tokenHash)
 
-	tokens, err := s.createSession(ctx, session.UserID, session.UserAgent, session.IPAddress)
+	// Get fresh role/permissions from DB (in case admin changed them)
+	role, err := s.roleRepo.GetUserRole(ctx, session.UserID)
+	roleName := "user"
+	var perms map[string]bool
+	if err == nil {
+		roleName = role.Name
+		perms = role.Permissions
+	}
+
+	tokens, err := s.createSession(ctx, session.UserID, roleName, perms, session.UserAgent, session.IPAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -148,15 +189,13 @@ func (s *AuthService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	return tokens, nil
 }
 
-// Logout deletes the session for a refresh token
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	tokenHash := hashToken(refreshToken)
 	return s.sessionRepo.DeleteByTokenHash(ctx, tokenHash)
 }
 
-// ValidateAccessToken parses and validates a JWT access token
-// Returns the user ID from the token claims
-func (s *AuthService) ValidateAccessToken(tokenString string) (string, error) {
+// ValidateAccessToken now returns full TokenClaims (userID + role + permissions)
+func (s *AuthService) ValidateAccessToken(tokenString string) (*TokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -164,27 +203,41 @@ func (s *AuthService) ValidateAccessToken(tokenString string) (string, error) {
 		return []byte(s.jwtCfg.Secret), nil
 	})
 	if err != nil {
-		return "", ErrInvalidToken
+		return nil, ErrInvalidToken
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
-		return "", ErrInvalidToken
+		return nil, ErrInvalidToken
 	}
 
-	userID, ok := claims["sub"].(string)
-	if !ok {
-		return "", ErrInvalidToken
+	userID, _ := claims["sub"].(string)
+	role, _ := claims["role"].(string)
+
+	// Parse permissions from JWT claims
+	perms := make(map[string]bool)
+	if permRaw, ok := claims["permissions"].(map[string]any); ok {
+		for k, v := range permRaw {
+			if boolVal, ok := v.(bool); ok {
+				perms[k] = boolVal
+			}
+		}
 	}
 
-	return userID, nil
+	if userID == "" {
+		return nil, ErrInvalidToken
+	}
+
+	return &TokenClaims{
+		UserID:      userID,
+		Role:        role,
+		Permissions: perms,
+	}, nil
 }
 
 // --- Private helpers ---
 
-// createSession generates tokens and stores session in DB
-func (s *AuthService) createSession(ctx context.Context, userID string, userAgent, ip *string) (*TokenPair, error) {
-	// Parse expiry durations from config strings
+func (s *AuthService) createSession(ctx context.Context, userID, role string, permissions map[string]bool, userAgent, ip *string) (*TokenPair, error) {
 	accessDuration, err := time.ParseDuration(s.jwtCfg.AccessExpiry)
 	if err != nil {
 		accessDuration = 15 * time.Minute
@@ -194,12 +247,15 @@ func (s *AuthService) createSession(ctx context.Context, userID string, userAgen
 		refreshDuration = 7 * 24 * time.Hour
 	}
 
-	// Generate JWT access token
 	now := time.Now()
+
+	// JWT now includes role + permissions
 	accessClaims := jwt.MapClaims{
-		"sub": userID,
-		"iat": now.Unix(),
-		"exp": now.Add(accessDuration).Unix(),
+		"sub":         userID,
+		"role":        role,
+		"permissions": permissions,
+		"iat":         now.Unix(),
+		"exp":         now.Add(accessDuration).Unix(),
 	}
 	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
 	accessString, err := accessToken.SignedString([]byte(s.jwtCfg.Secret))
@@ -207,14 +263,12 @@ func (s *AuthService) createSession(ctx context.Context, userID string, userAgen
 		return nil, fmt.Errorf("failed to sign access token: %w", err)
 	}
 
-	// Generate random refresh token (32 bytes = 64 hex chars)
 	refreshBytes := make([]byte, 32)
 	if _, err := rand.Read(refreshBytes); err != nil {
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 	refreshString := hex.EncodeToString(refreshBytes)
 
-	// Store session with HASHED refresh token
 	session := &repository.Session{
 		UserID:           userID,
 		RefreshTokenHash: hashToken(refreshString),
@@ -228,13 +282,18 @@ func (s *AuthService) createSession(ctx context.Context, userID string, userAgen
 
 	return &TokenPair{
 		AccessToken:  accessString,
-		RefreshToken: refreshString, // Raw token goes to client
+		RefreshToken: refreshString,
 		ExpiresAt:    now.Add(accessDuration).Unix(),
 	}, nil
 }
 
-// hashToken creates SHA-256 hash of a token for secure DB storage
 func hashToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
+}
+
+// strPtr is a helper to create a pointer to a string.
+// Needed because Go can't take the address of a literal: &"hello" doesn't work
+func strPtr(s string) *string {
+	return &s
 }

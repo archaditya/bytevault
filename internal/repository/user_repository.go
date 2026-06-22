@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/adityakkpk/bytevault/internal/model"
+	"github.com/archaditya/bytevault/internal/model"
 )
 
 var (
@@ -134,4 +134,66 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string, deletedBy st
 	}
 
 	return nil
+}
+
+// ListAll returns paginated users (for admin)
+func (r *UserRepository) ListAll(ctx context.Context, limit, offset int) ([]model.User, int, error) {
+	var total int
+	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count users: %w", err)
+	}
+
+	query := `
+		SELECT id, email, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at
+		FROM users WHERE deleted_at IS NULL
+		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []model.User
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(
+			&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.AvatarURL,
+			&u.IsVerified, &u.Status, &u.CreatedAt, &u.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+
+	return users, total, nil
+}
+
+// GetStats returns system-wide stats for admin dashboard
+func (r *UserRepository) GetStats(ctx context.Context) (map[string]any, error) {
+	var totalUsers, activeUsers, verifiedUsers int
+
+	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").Scan(&totalUsers)
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND status != 'inactive'").Scan(&activeUsers)
+	if err != nil {
+		return nil, err
+	}
+	err = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND is_verified = true").Scan(&verifiedUsers)
+	if err != nil {
+		return nil, err
+	}
+
+	var totalSessions int
+	r.db.QueryRow(ctx, "SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()").Scan(&totalSessions)
+
+	return map[string]any{
+		"total_users":    totalUsers,
+		"active_users":   activeUsers,
+		"verified_users": verifiedUsers,
+		"active_sessions": totalSessions,
+	}, nil
 }

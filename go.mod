@@ -1,4 +1,4 @@
-module github.com/adityakkpk/bytevault
+module github.com/archaditya/bytevault
 
 go 1.25.7
 

@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/adityakkpk/bytevault/internal/handler"
-	"github.com/adityakkpk/bytevault/internal/service"
+	"github.com/archaditya/bytevault/internal/handler"
+	"github.com/archaditya/bytevault/internal/service"
 )
 
 // registerAuthRoutes adds all /auth/* endpoints.
