@@ -28,6 +28,7 @@ export interface FileRecord {
   tags: string[];
   path: string;
   thumbnailColor: string;
+  status?: string; // UPLOADING | READY | FAILED
 }
 
 export interface FileTransferHistoryEntry {

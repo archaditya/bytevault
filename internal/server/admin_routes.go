@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/archaditya/bytevault/internal/handler"
 	appMiddleware "github.com/archaditya/bytevault/internal/middleware"
 	"github.com/archaditya/bytevault/internal/repository"
 )
@@ -24,9 +25,9 @@ func (s *Server) registerAdminRoutes(
 		ctx := c.Request().Context()
 		stats, err := userRepo.GetStats(ctx)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to get stats"})
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to get stats")
 		}
-		return c.JSON(http.StatusOK, stats)
+		return handler.SendSuccess(c, http.StatusOK, stats, nil)
 	}, appMiddleware.RequirePermission("admin:users"))
 
 	// GET /api/v1/admin/users?page=1&limit=20
@@ -39,18 +40,25 @@ func (s *Server) registerAdminRoutes(
 
 		users, total, err := userRepo.ListAll(c.Request().Context(), limit, offset)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to list users"})
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to list users")
 		}
-		return c.JSON(http.StatusOK, map[string]any{"users": users, "total": total, "page": page, "limit": limit})
+
+		pagination := handler.PaginationMetadata{
+			Total: total,
+			Limit: limit,
+			Page:  page,
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{"users": users}, pagination)
 	}, appMiddleware.RequirePermission("admin:users"))
 
 	// GET /api/v1/admin/roles
 	admin.GET("/roles", func(c echo.Context) error {
 		roles, err := roleRepo.ListAll(c.Request().Context())
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to list roles"})
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to list roles")
 		}
-		return c.JSON(http.StatusOK, map[string]any{"roles": roles})
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{"roles": roles}, nil)
 	}, appMiddleware.RequirePermission("admin:roles"))
 
 	// GET /api/v1/admin/activity?page=1&limit=50
@@ -63,8 +71,15 @@ func (s *Server) registerAdminRoutes(
 
 		logs, total, err := activityRepo.ListAll(c.Request().Context(), limit, offset)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to list activity"})
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to list activity")
 		}
-		return c.JSON(http.StatusOK, map[string]any{"logs": logs, "total": total, "page": page, "limit": limit})
+
+		pagination := handler.PaginationMetadata{
+			Total: total,
+			Limit: limit,
+			Page:  page,
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{"logs": logs}, pagination)
 	}, appMiddleware.RequirePermission("admin:activity"))
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -29,14 +30,14 @@ func (h *AuthHandler) Register(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Invalid request body"})
+		return SendError(c, http.StatusBadRequest, "Invalid request body")
 	}
 
 	if req.Email == "" || req.Password == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Email and password are required"})
+		return SendError(c, http.StatusBadRequest, "Email and password are required")
 	}
 	if len(req.Password) < 8 {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Password must be at least 8 characters"})
+		return SendError(c, http.StatusBadRequest, "Password must be at least 8 characters")
 	}
 
 	ip := c.RealIP()
@@ -45,15 +46,15 @@ func (h *AuthHandler) Register(c echo.Context) error {
 	user, tokens, err := h.authService.Register(c.Request().Context(), req.Email, req.Password, req.FirstName, req.LastName, &ip, &ua)
 	if err != nil {
 		if errors.Is(err, service.ErrEmailExists) {
-			return c.JSON(http.StatusConflict, map[string]any{"error": "Email already registered"})
+			return SendError(c, http.StatusConflict, "Email already registered")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Registration failed"})
+		return SendError(c, http.StatusInternalServerError, fmt.Sprintf("Registration failed: %v", err))
 	}
 
-	return c.JSON(http.StatusCreated, map[string]any{
+	return SendSuccess(c, http.StatusCreated, map[string]any{
 		"user":   user,
 		"tokens": tokens,
-	})
+	}, nil)
 }
 
 // POST /api/v1/auth/login
@@ -64,11 +65,11 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Invalid request body"})
+		return SendError(c, http.StatusBadRequest, "Invalid request body")
 	}
 
 	if req.Email == "" || req.Password == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Email and password are required"})
+		return SendError(c, http.StatusBadRequest, "Email and password are required")
 	}
 
 	// Pass user-agent and IP for session tracking
@@ -78,15 +79,15 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	user, tokens, err := h.authService.Login(c.Request().Context(), req.Email, req.Password, &userAgent, &ip)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
-			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Invalid email or password"})
+			return SendError(c, http.StatusUnauthorized, "Invalid email or password")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Login failed"})
+		return SendError(c, http.StatusInternalServerError, fmt.Sprintf("Login failed: %v", err))
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return SendSuccess(c, http.StatusOK, map[string]any{
 		"user":   user,
 		"tokens": tokens,
-	})
+	}, nil)
 }
 
 // POST /api/v1/auth/refresh
@@ -96,18 +97,20 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil || req.RefreshToken == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Refresh token is required"})
+		return SendError(c, http.StatusBadRequest, "Refresh token is required")
 	}
 
 	tokens, err := h.authService.RefreshTokens(c.Request().Context(), req.RefreshToken)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
-			return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Invalid or expired refresh token"})
+			return SendError(c, http.StatusUnauthorized, "Invalid or expired refresh token")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Token refresh failed"})
+		return SendError(c, http.StatusInternalServerError, fmt.Sprintf("Token refresh failed: %v", err))
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"tokens": tokens})
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"tokens": tokens,
+	}, nil)
 }
 
 // POST /api/v1/auth/logout
@@ -117,12 +120,14 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 	}
 
 	if err := c.Bind(&req); err != nil || req.RefreshToken == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Refresh token is required"})
+		return SendError(c, http.StatusBadRequest, "Refresh token is required")
 	}
 
 	if err := h.authService.Logout(c.Request().Context(), req.RefreshToken); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Logout failed"})
+		return SendError(c, http.StatusInternalServerError, fmt.Sprintf("Logout failed: %v", err))
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"message": "Logged out successfully"})
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"message": "Logged out successfully",
+	}, nil)
 }

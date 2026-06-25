@@ -3,10 +3,8 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/lib/query-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { RouteGuard } from "@/components/shared/route-guard";
 
-// Using Inter + JetBrains Mono as the concrete font pairing (Inter approximates Geist Sans'
-// grotesk proportions; JetBrains Mono fills the Geist Mono role for all numeric/data display).
-// Swap for the `geist` package's GeistSans/GeistMono if you prefer the exact Vercel typeface.
 const fontSans = Inter({
   subsets: ["latin"],
   variable: "--font-geist-sans",
@@ -36,7 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${fontSans.variable} ${fontMono.variable}`}>
       <body className="bg-bg text-ink font-sans antialiased">
         <QueryProvider>
-          <TooltipProvider>{children}</TooltipProvider>
+          <TooltipProvider>
+            <RouteGuard>{children}</RouteGuard>
+          </TooltipProvider>
         </QueryProvider>
       </body>
     </html>

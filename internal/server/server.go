@@ -4,6 +4,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/rs/zerolog"
 
 	"github.com/archaditya/bytevault/internal/config"
 	"github.com/archaditya/bytevault/internal/logger"
@@ -33,7 +34,22 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 		LogError:    true,
 		LogRemoteIP: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			logger.Log.Info().
+			var event *zerolog.Event
+			if v.Status >= 500 {
+				event = logger.Log.Error()
+				if v.Error != nil {
+					event = event.Err(v.Error)
+				}
+			} else if v.Status >= 400 {
+				event = logger.Log.Warn()
+				if v.Error != nil {
+					event = event.Err(v.Error)
+				}
+			} else {
+				event = logger.Log.Info()
+			}
+
+			event.
 				Int("status", v.Status).
 				Str("method", v.Method).
 				Str("uri", v.URI).

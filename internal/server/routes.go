@@ -14,7 +14,6 @@ import (
 )
 
 // registerRoutes wires all route groups together.
-// As the app grows, each feature gets its own registerXxxRoutes() function.
 func (s *Server) registerRoutes() {
 	// 1. Initialize Pluggable Storage Provider
 	var store storage.StorageProvider
@@ -51,7 +50,7 @@ func (s *Server) registerRoutes() {
 	fileService := service.NewFileService(fileRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket)
 
 	// 4. Initialize Handlers
-	fileHandler := handler.NewFileHandler(fileService)
+	fileHandler := handler.NewFileHandler(fileService, s.config.Storage.LocalDir)
 
 	// 5. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")

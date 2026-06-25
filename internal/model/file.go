@@ -14,6 +14,7 @@ type File struct {
 	FileSize        int64      `json:"file_size"`
 	ContentType     string     `json:"content_type"`
 	IsPublic        bool       `json:"is_public"`
+	Status          string     `json:"status"`           // UPLOADING, READY, FAILED
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	DeletedAt       *time.Time `json:"-"`

@@ -1,6 +1,7 @@
 "use client";
 
-import { Grid3x3, List, Search, Upload } from "lucide-react";
+import { useRef } from "react";
+import { Grid3x3, List, Search, Upload, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { useFilesStore } from "@/store";
 import { cn } from "@/lib/utils";
+import { useUploadFileMutation } from "@/services";
 
 const kindOptions = [
   { value: "all", label: "All types" },
@@ -32,6 +34,9 @@ const providerOptions = [
 ];
 
 export function FilesToolbar() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadMutation = useUploadFileMutation();
+
   const {
     viewMode,
     setViewMode,
@@ -43,8 +48,35 @@ export function FilesToolbar() {
     setProviderFilter,
   } = useFilesStore();
 
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    try {
+      await uploadMutation.mutateAsync(selectedFile);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-2.5">
+      {/* Invisible File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
       <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
         <Input
@@ -104,9 +136,17 @@ export function FilesToolbar() {
             <List className="h-3.5 w-3.5" />
           </button>
         </div>
-        <Button size="sm">
-          <Upload className="h-3.5 w-3.5" />
-          Upload
+        <Button
+          size="sm"
+          onClick={handleUploadClick}
+          disabled={uploadMutation.isPending}
+        >
+          {uploadMutation.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Upload className="h-3.5 w-3.5" />
+          )}
+          {uploadMutation.isPending ? "Uploading..." : "Upload"}
         </Button>
       </div>
     </div>

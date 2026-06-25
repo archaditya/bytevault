@@ -20,8 +20,8 @@ func NewFileRepository(db *pgxpool.Pool) *FileRepository {
 
 func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 	query := `
-		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 		RETURNING id, created_at, updated_at
 	`
 	err := r.db.QueryRow(ctx, query,
@@ -33,6 +33,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 		file.FileSize,
 		file.ContentType,
 		file.IsPublic,
+		file.Status,
 	).Scan(&file.ID, &file.CreatedAt, &file.UpdatedAt)
 
 	if err != nil {
@@ -43,7 +44,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, created_at, updated_at
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, created_at, updated_at
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -58,6 +59,7 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 		&file.FileSize,
 		&file.ContentType,
 		&file.IsPublic,
+		&file.Status,
 		&file.CreatedAt,
 		&file.UpdatedAt,
 	)
@@ -72,9 +74,9 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 
 func (r *FileRepository) ListByUserID(ctx context.Context, userID string) ([]*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, created_at, updated_at
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, created_at, updated_at
 		FROM files
-		WHERE user_id = $1 AND deleted_at IS NULL
+		WHERE user_id = $1 AND deleted_at IS NULL AND status = 'READY'
 		ORDER BY created_at DESC
 	`
 	rows, err := r.db.Query(ctx, query, userID)
@@ -96,6 +98,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, userID string) ([]*mo
 			&f.FileSize,
 			&f.ContentType,
 			&f.IsPublic,
+			&f.Status,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		)
@@ -110,6 +113,12 @@ func (r *FileRepository) ListByUserID(ctx context.Context, userID string) ([]*mo
 func (r *FileRepository) UpdatePublicStatus(ctx context.Context, id string, isPublic bool) error {
 	query := `UPDATE files SET is_public = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.Exec(ctx, query, isPublic, id)
+	return err
+}
+
+func (r *FileRepository) UpdateStatus(ctx context.Context, id string, status string) error {
+	query := `UPDATE files SET status = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, status, id)
 	return err
 }
 
