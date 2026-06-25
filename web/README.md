@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# ByteVault
 
-## Getting Started
+A high-performance file transfer and storage platform — resumable uploads, chunk-level retries, and multi-provider storage routing across Cloudflare R2, AWS S3, and local disk.
 
-First, run the development server:
+This is not a Drive/Dropbox clone. It's an engineering-focused console for **transfer sessions**, not file collaboration.
+
+## Stack
+
+- **Next.js 15** (App Router) + **TypeScript**
+- **Tailwind CSS** with a custom dark-theme token system
+- **shadcn/ui**-style primitives built on **Radix UI**
+- **Zustand** for client state (filters, view modes, tabs)
+- **React Query** for data-fetching simulation
+- **Recharts** for analytics/speed graphs
+- **Lucide** icons
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Project structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/                    # App Router routes
+  page.tsx              # Landing page
+  (app)/                # Authenticated app shell (sidebar + navbar)
+    dashboard/
+    files/[id]/
+    transfers/[id]/
+    storage/providers/  storage/usage/
+    shared/[id]/
+    analytics/
+    settings/
+    profile/
+components/
+  ui/                   # shadcn-style primitives (Button, Card, Dialog, ...)
+  layout/               # Sidebar, Navbar, AppShell
+  shared/               # ChunkVisualizer, StatusBadge, StatCard, EmptyState...
+features/               # Feature-scoped components, grouped by domain
+  dashboard/ files/ transfers/ storage/ shared/ analytics/ settings/ landing/
+hooks/                  # (reserved for shared hooks)
+lib/
+  mock/                 # Deterministic, seeded mock data generators
+  utils.ts  random.ts  query-provider.tsx
+services/               # React Query hooks per domain
+store/                  # Zustand stores per domain
+types/                  # Shared TypeScript types
+```
 
-## Learn More
+## Notable pieces
 
-To learn more about Next.js, take a look at the following resources:
+- **ChunkVisualizer** (`components/shared/chunk-visualizer.tsx`) — the app's signature
+  visualization. Every transfer renders as a grid of individually-tracked chunks
+  (pending / uploading / retrying / failed / complete) instead of a single progress bar.
+- **Mock data** is seeded with a deterministic PRNG (`lib/random.ts`) so server and client
+  renders match exactly — no hydration mismatches, and the dataset is stable across reloads.
+- **Services** wrap the mock data in React Query hooks with simulated latency, so swapping
+  in real API calls later is a matter of changing `services/*.service.ts` only.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Notes on fonts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The design spec calls for a Geist-style pairing (grotesk sans + matching mono for all
+numeric data). This build uses `next/font/google` with **Inter** + **JetBrains Mono** to
+avoid an extra dependency. Swap in the `geist` package's `GeistSans`/`GeistMono` in
+`app/layout.tsx` if you want the exact Vercel typeface.
 
-## Deploy on Vercel
+## Known limitations
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- All data is mocked client-side; there is no backend or persistence.
+- "Upload" and transfer-control buttons (pause/resume/retry/cancel) are UI affordances
+  without wired-up mutations — hook them into real endpoints via `services/`.

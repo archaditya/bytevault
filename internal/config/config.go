@@ -15,6 +15,17 @@ type Config struct {
 	Database DatabaseConfig `koanf:"db"`
 	App      AppConfig      `koanf:"app"`
 	JWT      JWTConfig      `koanf:"jwt"`
+	Storage  StorageConfig  `koanf:"storage"`
+}
+
+type StorageConfig struct {
+	Provider          string `koanf:"provider"` // local, cloudinary, r2
+	LocalDir          string `koanf:"localdir"`
+	CloudinaryURL     string `koanf:"cloudinaryurl"`
+	R2Endpoint        string `koanf:"r2endpoint"`
+	R2AccessKeyID     string `koanf:"r2accesskeyid"`
+	R2SecretAccessKey string `koanf:"r2secretaccesskey"`
+	R2Bucket          string `koanf:"r2bucket"`
 }
 
 type ServerConfig struct {
@@ -46,8 +57,8 @@ type AppConfig struct {
 }
 
 type JWTConfig struct {
-	Secret string `koanf:"secret"`
-	AccessExpiry string `koanf:"accessexpiry"`
+	Secret        string `koanf:"secret"`
+	AccessExpiry  string `koanf:"accessexpiry"`
 	RefreshExpiry string `koanf:"refreshexpiry"`
 }
 
