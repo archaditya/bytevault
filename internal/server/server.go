@@ -1,22 +1,25 @@
 package server
 
 import (
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/rs/zerolog"
 
-	"github.com/adityakkpk/bytevault/internal/config"
-	"github.com/adityakkpk/bytevault/internal/logger"
+	"github.com/archaditya/bytevault/internal/config"
+	"github.com/archaditya/bytevault/internal/logger"
 )
 
 // Server holds the Echo instance and all dependencies.
 type Server struct {
-	echo	*echo.Echo
+	echo   *echo.Echo
 	config *config.Config
+	db     *pgxpool.Pool
 }
 
 // New functon creates a server. This is a dependency injection:
 // pass the config in, rather than reading it from a global
-func New(cfg *config.Config) *Server{
+func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	e := echo.New()
 	e.HideBanner = true
 
@@ -31,12 +34,27 @@ func New(cfg *config.Config) *Server{
 		LogError:    true,
 		LogRemoteIP: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			logger.Log.Info().
+			var event *zerolog.Event
+			if v.Status >= 500 {
+				event = logger.Log.Error()
+				if v.Error != nil {
+					event = event.Err(v.Error)
+				}
+			} else if v.Status >= 400 {
+				event = logger.Log.Warn()
+				if v.Error != nil {
+					event = event.Err(v.Error)
+				}
+			} else {
+				event = logger.Log.Info()
+			}
+
+			event.
 				Int("status", v.Status).
 				Str("method", v.Method).
 				Str("uri", v.URI).
 				Str("ip", v.RemoteIP).
-				Str("latency", v.Latency.String()). 
+				Str("latency", v.Latency.String()).
 				Msg("request")
 			return nil
 		},
@@ -52,8 +70,9 @@ func New(cfg *config.Config) *Server{
 	e.Use(middleware.RequestID()) // Adds unique ID to each request
 
 	s := &Server{
-		echo: e,
+		echo:   e,
 		config: cfg,
+		db:     db,
 	}
 
 	s.registerRoutes()
