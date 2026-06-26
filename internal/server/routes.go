@@ -44,13 +44,16 @@ func (s *Server) registerRoutes() {
 	activityRepo := repository.NewActivityRepository(s.db)
 	deviceRepo := repository.NewDeviceRepository(s.db)
 	fileRepo := repository.NewFileRepository(s.db)
+	folderRepo := repository.NewFolderRepository(s.db)
 
 	// 3. Initialize Services
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, s.config.JWT)
 	fileService := service.NewFileService(fileRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket)
+	folderService := service.NewFolderService(folderRepo, fileRepo)
 
 	// 4. Initialize Handlers
 	fileHandler := handler.NewFileHandler(fileService, s.config.Storage.LocalDir)
+	folderHandler := handler.NewFolderHandler(folderService)
 
 	// 5. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")
@@ -62,14 +65,14 @@ func (s *Server) registerRoutes() {
 	// Protected routes (JWT required)
 	authMiddleware := appMiddleware.Auth(authService)
 	protected := v1.Group("", authMiddleware)
-	s.registerUserRoutes(protected, userRepo, deviceRepo, sessionRepo)
+	s.registerUserRoutes(protected, userRepo, deviceRepo, sessionRepo, fileRepo)
+	s.registerFolderRoutes(protected, folderHandler)
 
 	// Admin routes (JWT + admin permissions required)
 	s.registerAdminRoutes(protected, userRepo, roleRepo, sessionRepo, activityRepo)
 
-	// File endpoints (registers private /upload and public download routes)
+	// File endpoints
 	s.registerFileRoutes(v1, fileHandler, authMiddleware)
 }
 
-// Helper type so we can pass Echo groups cleanly
 type Group = echo.Group

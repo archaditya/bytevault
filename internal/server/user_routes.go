@@ -10,11 +10,14 @@ import (
 	"github.com/archaditya/bytevault/internal/repository"
 )
 
+const DefaultQuotaBytes = 5 * 1024 * 1024 * 1024 // 5 GB
+
 func (s *Server) registerUserRoutes(
 	protected *Group,
 	userRepo *repository.UserRepository,
 	deviceRepo *repository.DeviceRepository,
 	sessionRepo *repository.SessionRepository,
+	fileRepo *repository.FileRepository,
 ) {
 	// GET /api/v1/me
 	protected.GET("/me", func(c echo.Context) error {
@@ -30,6 +33,26 @@ func (s *Server) registerUserRoutes(
 		user.Permissions = perms
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"user": user}, nil)
+	})
+
+	// GET /api/v1/me/quota
+	protected.GET("/me/quota", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+		used, err := fileRepo.GetUserStorageUsed(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to fetch storage usage")
+		}
+
+		remaining := int64(DefaultQuotaBytes) - used
+		if remaining < 0 {
+			remaining = 0
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{
+			"used_bytes":      used,
+			"total_bytes":     int64(DefaultQuotaBytes),
+			"remaining_bytes": remaining,
+		}, nil)
 	})
 
 	// POST /api/v1/me/devices — register FCM token

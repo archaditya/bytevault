@@ -155,3 +155,14 @@ func (r *RoleRepository) GetUserRole(ctx context.Context, userID string) (*model
 
 	return &role, nil
 }
+
+func (r *RoleRepository) UpdateUserRole(ctx context.Context, userID, roleID string) error {
+	// First delete all roles for the user
+	_, err := r.db.Exec(ctx, "DELETE FROM user_roles WHERE user_id = $1", userID)
+	if err != nil {
+		return err
+	}
+	// Assign new role
+	_, err = r.db.Exec(ctx, "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)", userID, roleID)
+	return err
+}
