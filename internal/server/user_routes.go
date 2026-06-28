@@ -8,9 +8,8 @@ import (
 	"github.com/archaditya/bytevault/internal/handler"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/service"
 )
-
-const DefaultQuotaBytes = 5 * 1024 * 1024 * 1024 // 5 GB
 
 func (s *Server) registerUserRoutes(
 	protected *Group,
@@ -43,14 +42,14 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to fetch storage usage")
 		}
 
-		remaining := int64(DefaultQuotaBytes) - used
+		remaining := int64(service.DefaultQuotaBytes) - used
 		if remaining < 0 {
 			remaining = 0
 		}
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{
 			"used_bytes":      used,
-			"total_bytes":     int64(DefaultQuotaBytes),
+			"total_bytes":     int64(service.DefaultQuotaBytes),
 			"remaining_bytes": remaining,
 		}, nil)
 	})
