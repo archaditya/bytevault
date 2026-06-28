@@ -15,6 +15,7 @@ type File struct {
 	ContentType     string     `json:"content_type"`
 	IsPublic        bool       `json:"is_public"`
 	Status          string     `json:"status"`           // UPLOADING, READY, FAILED
+	FolderID        *string    `json:"folder_id,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	DeletedAt       *time.Time `json:"-"`

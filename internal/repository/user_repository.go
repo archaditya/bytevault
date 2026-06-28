@@ -34,7 +34,7 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName).Scan(
 		&created.ID,
 		&created.Email,
-		&created.Password, // BUG FIX: was missing, must match RETURNING column order
+		&created.Password,
 		&created.FirstName,
 		&created.LastName,
 		&created.AvatarURL,
@@ -73,8 +73,6 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 		&user.DeletedAt,
 	)
 	if err != nil {
-		// BUG FIX: was missing ErrNoRows check — without this,
-		// "user not found" and "DB error" look the same to the caller
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUserNotFound
 		}
@@ -121,8 +119,6 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string, deletedBy st
 		SET deleted_at = NOW(), deleted_by = $2, updated_at = NOW(), status = 'inactive'
 		WHERE id = $1 AND deleted_at IS NULL
 	`
-	// BUG FIX: SQL strings use single quotes, not double quotes.
-	// Double quotes in PostgreSQL mean column/table names, not string values.
 
 	result, err := r.db.Exec(ctx, query, id, deletedBy)
 	if err != nil {
@@ -136,7 +132,6 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string, deletedBy st
 	return nil
 }
 
-// ListAll returns paginated users (for admin)
 func (r *UserRepository) ListAll(ctx context.Context, limit, offset int) ([]model.User, int, error) {
 	var total int
 	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").Scan(&total)
@@ -190,10 +185,59 @@ func (r *UserRepository) GetStats(ctx context.Context) (map[string]any, error) {
 	var totalSessions int
 	r.db.QueryRow(ctx, "SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()").Scan(&totalSessions)
 
+	var totalFiles int64
+	var totalStorage int64
+	err = r.db.QueryRow(ctx, "SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM files WHERE deleted_at IS NULL AND status = 'READY'").Scan(&totalFiles, &totalStorage)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := r.db.Query(ctx, "SELECT storage_provider, COALESCE(SUM(file_size), 0), COUNT(*) FROM files WHERE deleted_at IS NULL AND status = 'READY' GROUP BY storage_provider")
+	var providerStats []map[string]any
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var provider string
+			var size int64
+			var count int
+			if err := rows.Scan(&provider, &size, &count); err == nil {
+				providerStats = append(providerStats, map[string]any{
+					"provider":   provider,
+					"used_bytes": size,
+					"file_count": count,
+				})
+			}
+		}
+	}
+
 	return map[string]any{
-		"total_users":    totalUsers,
-		"active_users":   activeUsers,
-		"verified_users": verifiedUsers,
-		"active_sessions": totalSessions,
+		"total_users":      totalUsers,
+		"active_users":     activeUsers,
+		"verified_users":   verifiedUsers,
+		"active_sessions":  totalSessions,
+		"total_files":      totalFiles,
+		"total_storage":    totalStorage,
+		"provider_storage": providerStats,
 	}, nil
+}
+
+func (r *UserRepository) UpdateDetails(ctx context.Context, id string, firstName *string, lastName *string, status *string, isVerified *bool) error {
+	query := `
+		UPDATE users
+		SET first_name = COALESCE($2, first_name),
+		    last_name = COALESCE($3, last_name),
+		    status = COALESCE($4, status),
+		    is_verified = COALESCE($5, is_verified),
+		    updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	_, err := r.db.Exec(ctx, query, id, firstName, lastName, status, isVerified)
+	return err
+}
+
+func (r *UserRepository) GetUserStorageStats(ctx context.Context, userID string) (int64, int64, error) {
+	var totalFiles int64
+	var totalStorage int64
+	err := r.db.QueryRow(ctx, "SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM files WHERE user_id = $1 AND deleted_at IS NULL AND status = 'READY'", userID).Scan(&totalFiles, &totalStorage)
+	return totalFiles, totalStorage, err
 }

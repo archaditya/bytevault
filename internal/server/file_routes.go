@@ -19,10 +19,12 @@ func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, auth
 	{
 		filesGroup.POST("/upload-session", fh.CreateUploadSession)
 		filesGroup.POST("/:id/complete", fh.CompleteUpload)
-		filesGroup.POST("/upload", fh.Upload) // Keep as fallback legacy route
+		filesGroup.POST("/upload", fh.Upload) // Legacy route
 		filesGroup.GET("", fh.List)
 		filesGroup.GET("/:id/download", fh.Download)
 		filesGroup.PATCH("/:id/share", fh.ToggleShare)
+		filesGroup.PUT("/:id/move", fh.Move)
 		filesGroup.DELETE("/:id", fh.Delete)
+		filesGroup.GET("/:id", fh.GetDetails)
 	}
 }
