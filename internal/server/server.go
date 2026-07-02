@@ -1,6 +1,7 @@
 package server
 
 import (
+	"golang.org/x/time/rate"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -24,7 +25,10 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	e.HideBanner = true
 
 	// Middleware = functions that run BEFORE handler
-	// Request → Recover → CORS → RequestID → Handler → Response
+	// Request → RateLimit → Recover → CORS → RequestID → Handler → Response
+
+	// Rate Limiting: 20 requests per second per IP
+	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(20))))
 
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogStatus:   true,

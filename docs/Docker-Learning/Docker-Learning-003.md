@@ -3,27 +3,34 @@
 ## Docker Compose
 
 ### Our current situation
+
 If we have to run API than
+
 ```bash
 docker run \
   --env-file .env \
   -p 8001:8001 \
   winiwn-api:v2
 ```
+
 Worker
+
 ```bash
 docker run \
   --env-file .env \
   winwin-api:v2 \
   node dist/bin/worker.js
 ```
+
 Scheduler
+
 ```bash
 docker run \
   --env-file .env \
   winwin-api:v2 \
   node dist/bin/scheduler.js
 ```
+
 And different commands for Redis and MySQL.
 
 Now the the question is who is responsible for this? Developer or project configuration.
@@ -35,6 +42,7 @@ So, to solve this problem we use **Docker Compose**.
 ---
 
 ## What is Docker Compose?
+
 Compose is Infrastructure as Code.
 
 Like we write code for backend.
@@ -42,6 +50,7 @@ Like we write code for backend.
 Same we write code for the infrastructure also
 
 Instead of remembering:
+
 ```bash
 docker run ...
 docker run ...
@@ -49,16 +58,21 @@ docker run ...
 docker network create ...
 docker volume create ...
 ```
+
 We just write a single file.
+
 ```
 docker-compose.yml
 ```
+
 then docker will manage everything.
 
 ---
 
 ## Design the Architecture
+
 Our services
+
 ```
 API
 Worker
@@ -66,11 +80,13 @@ Scheduler
 Redis
 MySQL
 ```
+
 Question.
 
 What all services we are writing?
 
 ---
+
 **API**
 Ours
 
@@ -97,6 +113,7 @@ Docker Hub
 ---
 
 In-short
+
 ```
         Services
 
@@ -114,9 +131,11 @@ MySQL       ---> official image
 ---
 
 ### API / Worker / Scheduler
+
 Actually, these 3 are not different applications.
 
 These are three entry points of a single codebase.
+
 ```
 win-win-api
 
@@ -128,6 +147,7 @@ win-win-api
 
         └── scheduler.js
 ```
+
 This is why
 
 One Image.
@@ -137,9 +157,11 @@ Three containers.
 ---
 
 ### First design decision
+
 Will only build image one in the compose.
 
 ### Compose Skeleton
+
 ```YAML
 services:
 
@@ -153,23 +175,28 @@ services:
 
   mysql:
 ```
+
 This it.
 
 ---
 
 ### API Service
+
 What is the minimum codes /commands required for a service to run?
 
 If we look closely at `docker run`
+
 ```bash
 docker run \
   --env-file .env \
   -p 8001:8001 \
   winwin-api:v2
 ```
+
 These all information will convert into YAML.
 
 So what all the information are in this `docker run`:
+
 ```
 winwin-api:v2     -> image: (or build:)
 
@@ -181,30 +208,39 @@ winwin-api:v2     -> image: (or build:)
 One important thing is missing.
 
 As we are run
+
 ```bash
 docker run winwin-api:v2
 ```
+
 Than by default
+
 ```
 CMD ["node", "dist/bin/api.js"]
 ```
+
 Runs, which is there in the Dockerfile.
 
 But for the worker
+
 ```bash
 docker run winwin-api:v2 \
   node dist/bin/worker.js
 ```
+
 what did we do here?
 
 **We override the CMD**
 
 This is the same thing happens in then compose:
+
 ```YAML
 worker:
   command: node dist/bin/worker.js
 ```
+
 And scheduler:
+
 ```YAML
 scheduler:
   command: node dist/bin/scheduler.js
@@ -213,14 +249,18 @@ scheduler:
 ---
 
 ## Important Concept
+
 As of now we are using image as:
+
 ```
 Dockerfile
       │
       ▼
 CMD = node dist/bin/api.js
 ```
+
 API container:
+
 ```
 Image
  └── CMD
@@ -228,7 +268,9 @@ Image
       ▼
 api.js
 ```
+
 Worker container:
+
 ```
 Same Image
       │
@@ -238,6 +280,7 @@ Compose overrides CMD
       ▼
 worker.js
 ```
+
 Same goes for scheduler as well.
 
 That is why one image can perform multiple roles.
@@ -247,15 +290,18 @@ This is a very common pattern in production.
 ---
 
 Now for the API will write something like this in Compose:
+
 ```YAML
 api:
   build: .
 ```
+
 This will build the image.
 
 But for the worker and scheduler we need to pull this image to use.
 
 So this below approach is best:
+
 ```YAML
 x-app: &app
   build: .
@@ -278,6 +324,7 @@ services:
     <<: *app
     command: node dist/bin/scheduler.js
 ```
+
 Now Compose will build image if image not exist.
 
 This will make things reliable, as any one will clone this project and directly run `docker compose up` than it will build image and use that image.
@@ -287,20 +334,26 @@ This will make things reliable, as any one will clone this project and directly 
 Generally, there are two approaches in the Compose:
 
 **Development**
+
 ```YAML
 build: .
 ```
+
 Reason:
+
 - changes in code code frequently
 - Image builds on local machine
 
 ---
 
 **Production**
+
 ```YAML
 image: ghcr.io/company/win-win-api:1.0.5
 ```
+
 Reason:
+
 - Image has already build in the CI/CD
 - Server only pulls the image
 - Production server does not need source code
@@ -308,22 +361,28 @@ Reason:
 ## Writing docker-compose.yaml
 
 ### Step 1 - File Creation
+
 In the project root create
+
 ```
 docker-compose.yml
 ```
 
 ### Step 2 - Root Key
+
 ```YAML
 services:
 ```
+
 Each service eventually be a Container
 
 ### Step 3 - API Service
+
 ```YAML
 services:
   api
 ```
+
 `api` is a logical name only.
 
 its not an image name.
@@ -333,10 +392,13 @@ or its also not a container name.
 This is only a service identifier.
 
 So that we can write:
+
 ```bash
 docker compose up api
 ```
+
 or
+
 ```bash
 docker compose logs api
 ```
@@ -344,24 +406,29 @@ docker compose logs api
 ---
 
 ### Step 4 - Build
+
 ```YAML
 services:
   api:
     build: .
 ```
+
 What is this `.`?
 This is current directory.
 
 Compose initially runs this command:
+
 ```bash
 docker build .
 ```
+
 And the Dockerfile is in this directory also.
 
 ---
 
 **If in case there is different name of Dockerfile**
 Example:
+
 ```
 docker/
   Dockerfile.dev
@@ -378,13 +445,16 @@ build:
 ---
 
 ### Step 5 - image
+
 ```YAML
 services:
   api:
     build: .
     image: winwin-api:latest
 ```
+
 image is used to provide names to image. If we does not specify the image name it autogenerate name with formats like:
+
 ```
 <project-name>-<service-name>
 
@@ -394,14 +464,18 @@ image is used to provide names to image. If we does not specify the image name i
 ---
 
 ### Step 6 - container_name
+
 By default docker generates container names
 examples:
+
 ```
 happy_einstein
 
 win-win-api-api-1
 ```
+
 but if we put `container_name` in YAML than it will use that name only
+
 ```YAML
 services:
   api:
@@ -409,9 +483,11 @@ services:
     image: winwin-api:latest
     container_name: winwin-api
 ```
+
 In production environment we avoid naming the containers as we have replicas so if we fixed the name than it will create unnecessary confusion.
 
 ### Step 7 - ports
+
 ```YAML
 services:
   api:
@@ -421,19 +497,24 @@ services:
     ports:
       - "8001:8001"
 ```
+
 It does mapping between host machine port and Container port
 
 Syntax:
+
 ```
 HOST_PORT:CONTAINER_PORT
 ```
+
 Important:
+
 ```
 LEFT = Host
 RIGHT = Container
 ```
 
 Visualization:
+
 ```
               Host (My Laptop)
           localhost:8001
@@ -449,6 +530,7 @@ Visualization:
 ---
 
 ### Step 8 - Env
+
 ```YAML
 services:
   api:
@@ -460,6 +542,7 @@ services:
     env_file:
       - .env
 ```
+
 It injects all the environment variables of `.env` inside container
 
 Or
@@ -473,7 +556,9 @@ environment:
 ---
 
 ### Step 9 - Redis Service
+
 Inside `services`, add:
+
 ```YAML
 services:
   api:
@@ -490,15 +575,17 @@ services:
     container_name: winwin-redis
 ```
 
-**Breakdown:**
----
+## **Breakdown:**
+
 **redis**:
+
 - `redis` : This is logical name of service
 - It is used in compose command: `docker compose logs redis`
 
 ---
 
 **image: redis:7-alpine**
+
 - This is the official redis image from Docker Hub
 - If this image does not exist internally than compose will pull it from docker hub like this `docker pull redis:7-alpine`
 
@@ -506,22 +593,28 @@ services:
 
 **What is `7-alpine`?**
 Image name:
+
 ```
 redis
 ```
+
 Tag:
+
 ```
 7-alpine
 ```
-- Redis Version = 7 
+
+- Redis Version = 7
 - Base OS = Alpine Linux
 
 ---
 
 **`container_name`**
+
 ```YAML
 container_name: winwin-redis
 ```
+
 it is container name.
 
 ---
@@ -531,6 +624,7 @@ it is container name.
 ---
 
 ### Step 10 - Assigning `ports` to Redis
+
 ```YAML
 redis:
   image: redis:7-alpine
@@ -538,17 +632,19 @@ redis:
   ports:
     - "6379:6379"
 ```
+
 In the development we are assigning ports here because if **Developer** wants to access redis form host machine than he can access it.
 
-**Internal Communication** (API -> Redis) is done using Docker network so no need of port. 
+**Internal Communication** (API -> Redis) is done using Docker network so no need of port.
 
 **External Communication** (Laptop -> Redis) is Host -> Container communication so we need ports for that.
 
 That's why in production we do not write ports in the `docker-compose` for redis.
 
-Event we are not specified any network related things till now. even though Compose will internally generate a bridge network `winwin-default`. 
+Event we are not specified any network related things till now. even though Compose will internally generate a bridge network `winwin-default`.
 
 And both the containers will be joined inside it:
+
 ```
                  winwin_default
 
@@ -568,6 +664,7 @@ And both the containers will be joined inside it:
 ```
 
 ### Step 11 - MySQL Service
+
 ```YAML
 mysql:
   image: mysql:8.4
@@ -579,6 +676,7 @@ mysql:
 ---
 
 ### Step 12 - MySQL Environments
+
 ```YAML
 mysql:
   image: mysql:8.4
@@ -597,6 +695,7 @@ mysql:
 This sets the environment variables of container.
 
 When MySQL container starts first time, MySQL startup script reads these variables:
+
 ```
 MYSQL_ROOT_PASSWORD
         │
@@ -621,8 +720,8 @@ Set user password
 
 ---
 
-
 ### Step 13 - Volumes
+
 ```YAML
 mysql:
   image: mysql:8.4
@@ -635,7 +734,9 @@ mysql:
   volumes:
     - mysql-data:/var/lib/mysql
 ```
+
 And at the end of file add this:
+
 ```YAML
 volumes:
   mysql-data:
@@ -646,6 +747,7 @@ volumes:
 **Where MySQL actually stores data?**
 
 Inside the container:
+
 ```
 MySQL Container
 
@@ -657,21 +759,23 @@ MySQL Container
 │   └── lib
 │       └── mysql   <-- Database files
 ```
+
 this `/var/lib/mysql` is the default data directory of MySQL.
 
 This place contains all the:
+
 - tables
 - indexes
 - users
 - passwords
 - transactions
 
-
 **The Problem**
 
 As the container is deleted, the data also gets deleted.
 
 That is the reason we use `volumes`.
+
 ```
 Container
 
@@ -684,11 +788,13 @@ Docker Volume
 
 mysql-data
 ```
+
 Now database is not inside the container.
 
 ---
 
 Look at this syntax:
+
 ```
 mysql-data:/var/lib/mysql
 ```
@@ -696,6 +802,7 @@ mysql-data:/var/lib/mysql
 **Left Side**
 
 Docker Volume
+
 ```
 mysql-data
 ```
@@ -703,21 +810,23 @@ mysql-data
 **Right Side**
 
 Container Path
+
 ```
 /var/lib/mysql
 ```
+
 This means, mount this Docker volume with container's `/var/lib/mysql`.
 
 ---
 
-These volumes are generally in the Linux at location `/var/lib/docker/volumes/`.
----
+## These volumes are generally in the Linux at location `/var/lib/docker/volumes/`.
 
 > **Note:** Containers are ephemeral, but databases require persistent storage. Docker Volumes provide storage that exists independently of a container. By mounting mysql-data to /var/lib/mysql, MySQL stores its database files in a persistent Docker-managed volume instead of the container's writable layer. Deleting the container does not delete the volume or the stored data.
 
 ---
 
 ### Step 13 - MySQL Ports
+
 ```YAML
 mysql:
   image: mysql:8.4
@@ -733,12 +842,12 @@ mysql:
     - mysql-data:/var/lib/mysql
 ```
 
---- 
+---
 
 > **Note**: Exposing MySQL with 3306:3306 is mainly a development convenience. It allows database tools running on the host (Workbench, DBeaver, etc.) to connect to the MySQL container. Containers inside the same Docker network do not require exposed ports to communicate with each other.
 
-
 ### Step 14 - `depends-on`
+
 ```YAML
 api:
   build: .
@@ -752,9 +861,11 @@ api:
     - mysql
     - redis
 ```
+
 It tells the Docker Compose that before starting API container start MySQL and Redis containers.
 
 Flow:
+
 ```
 docker compose up
 
@@ -773,13 +884,15 @@ Start redis
 
 Start api
 ```
---- 
+
+---
 
 Here is a catch.
 
 It takes some time to start the MySQL.
 
 Example Timeline:
+
 ```
 0 sec
 
@@ -810,6 +923,7 @@ ECONNREFUSED ❌
 
 MySQL finally ready
 ```
+
 This is very common production issue.
 
 ---
@@ -817,6 +931,7 @@ This is very common production issue.
 To solve this we user 3 approaches:
 
 1. Retry Logic
+
 ```
 Try DB
 
@@ -838,7 +953,8 @@ Success
 ```
 
 2. Healthcheck + depends_on
-We write Healthcheck:
+   We write Healthcheck:
+
 ```
 MySQL Healthy
 
@@ -848,8 +964,58 @@ Than API start
 ```
 
 3. Wait-for-it.sh
-Very old approach.
+   Very old approach.
 
 ---
 
 > **Note**: `depends_on` only controls the startup order of containers. It does not guarantee that a dependency is fully initialized or ready to accept connections. Production applications typically combine `depends_on` with health checks or implement retry logic during startup.
+
+
+### Step 15 - Worker Service
+
+```YAML
+worker:
+  image: winwin-api:latest
+  container_name: winwin-worker
+  env_file:
+    - .env
+  depends_on:
+    - mysql
+    - redis
+  command: npm run dev:worker
+```
+
+As you can see here no `build`, no `ports`. Because will use our existing image build of api and workser only communicates with host machine so there is no need of any port here.
+
+---
+
+Here is this command:
+```bash
+command: npm run dev:worker
+```
+This is a very powerful feature of docker.
+
+In the Dockerfile we have something like this:
+```Dockerfile
+CMD ["node", "dist/bin/api.js"]
+```
+When we define any `command` in the Compose than this command overrides that `CMD` of Dockerfile.
+
+> **Note**: A Docker image is a reusable template. Multiple containers can be created from the same image by overriding the startup command with `command:` in Docker Compose. This allows the API, Worker, and Scheduler to share the same codebase while executing different entry points, avoiding duplicate builds and reducing image maintenance.
+
+---
+
+### Step 16 - Scheduler Service
+```YAML
+scheduler:
+  image: winwin-api:latest
+  container_name: winwin-scheduler
+  env_file:
+    - .env
+  depends_on:
+    - mysql
+    - redis
+  command: npm run dev:scheduler
+```
+
+> **Note**: Multiple services in Docker Compose can share the same image while executing different entry points using the command directive. This allows a single codebase to be deployed as independent runtime processes (API, Worker, Scheduler) without maintaining separate Docker images.
