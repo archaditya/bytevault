@@ -213,7 +213,7 @@ func (r *FileRepository) MoveFile(ctx context.Context, id string, folderID *stri
 }
 
 func (r *FileRepository) GetUserStorageUsed(ctx context.Context, userID string) (int64, error) {
-	query := `SELECT COALESCE(SUM(file_size), 0) FROM files WHERE user_id = $1 AND deleted_at IS NULL AND status = 'READY'`
+	query := `SELECT COALESCE(SUM(file_size), 0) FROM files WHERE user_id = $1 AND deleted_at IS NULL AND status IN ('READY', 'UPLOADING')`
 	var total int64
 	err := r.db.QueryRow(ctx, query, userID).Scan(&total)
 	return total, err
