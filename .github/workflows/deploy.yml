@@ -19,14 +19,22 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
-
           script: |
+            set -e
+
             cd ~/projects/bytevault
 
-            git pull origin main
+            git fetch origin
+            git reset --hard origin/main
 
             docker compose up --build -d
 
-            sleep 8
+            sleep 10
 
             docker compose restart backend
+
+            sleep 10
+
+            curl --fail http://localhost:8080/api/v1/health
+
+            docker image prune -f
