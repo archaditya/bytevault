@@ -27,4 +27,6 @@ jobs:
 
             docker compose up --build -d
 
-            docker image prune -f
+            sleep 8
+
+            docker compose restart backend
