@@ -1,0 +1,40 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+
+            cd ~/projects/bytevault
+
+            git fetch origin
+            git reset --hard origin/main
+
+            docker compose up --build -d
+
+            sleep 10
+
+            docker compose restart backend
+
+            sleep 10
+
+            curl --fail http://localhost:8080/api/v1/health
+
+            docker image prune -f
