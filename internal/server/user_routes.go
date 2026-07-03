@@ -2,13 +2,16 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/archaditya/bytevault/internal/handler"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/service"
+	"github.com/archaditya/bytevault/internal/storage"
 )
 
 func (s *Server) registerUserRoutes(
@@ -17,6 +20,7 @@ func (s *Server) registerUserRoutes(
 	deviceRepo *repository.DeviceRepository,
 	sessionRepo *repository.SessionRepository,
 	fileRepo *repository.FileRepository,
+	store storage.StorageProvider,
 ) {
 	// GET /api/v1/me
 	protected.GET("/me", func(c echo.Context) error {
@@ -32,6 +36,122 @@ func (s *Server) registerUserRoutes(
 		user.Permissions = perms
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"user": user}, nil)
+	})
+
+	// PATCH /api/v1/me — update profile (first_name, last_name)
+	protected.PATCH("/me", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+
+		var req struct {
+			FirstName *string `json:"first_name"`
+			LastName  *string `json:"last_name"`
+		}
+		if err := c.Bind(&req); err != nil {
+			return handler.SendError(c, http.StatusBadRequest, "Invalid request body")
+		}
+
+		if err := userRepo.UpdateDetails(c.Request().Context(), userID, req.FirstName, req.LastName, nil, nil); err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to update profile")
+		}
+
+		user, err := userRepo.FindByID(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Profile updated but failed to reload user")
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{
+			"message": "Profile updated successfully",
+			"user":    user,
+		}, nil)
+	})
+
+	// POST /api/v1/me/avatar — upload user profile avatar
+	protected.POST("/me/avatar", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+
+		file, err := c.FormFile("avatar")
+		if err != nil {
+			return handler.SendError(c, http.StatusBadRequest, "No avatar file provided in form field 'avatar'")
+		}
+
+		src, err := file.Open()
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to read avatar file")
+		}
+		defer src.Close()
+
+		// Basic content type validation
+		contentType := file.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "image/png"
+		}
+
+		// Save the file to the storage provider
+		storageKey := "avatars/" + userID + "_" + file.Filename
+		_, err = store.Upload(c.Request().Context(), storageKey, src, file.Size, contentType)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to upload avatar to storage: "+err.Error())
+		}
+
+		// Generate the URL/Download link for the avatar
+		avatarURL, err := store.GeneratePresignedDownloadURL(c.Request().Context(), storageKey, 365*24*time.Hour)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to generate download URL for avatar")
+		}
+
+		// Update database
+		if err := userRepo.UpdateAvatarURL(c.Request().Context(), userID, avatarURL); err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to save avatar path to user profile")
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{
+			"message":    "Avatar uploaded successfully",
+			"avatar_url": avatarURL,
+		}, nil)
+	})
+
+	// POST /api/v1/me/change-password
+	protected.POST("/me/change-password", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+
+		var req struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := c.Bind(&req); err != nil || req.CurrentPassword == "" || req.NewPassword == "" {
+			return handler.SendError(c, http.StatusBadRequest, "Current password and new password are required")
+		}
+
+		if len(req.NewPassword) < 6 {
+			return handler.SendError(c, http.StatusBadRequest, "New password must be at least 6 characters")
+		}
+
+		user, err := userRepo.FindByID(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusNotFound, "User not found")
+		}
+
+		if user.Password == nil {
+			return handler.SendError(c, http.StatusBadRequest, "No password set for this account")
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(req.CurrentPassword)); err != nil {
+			return handler.SendError(c, http.StatusUnauthorized, "Current password is incorrect")
+		}
+
+		hashedBytes, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 14)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to hash new password")
+		}
+		hashedPassword := string(hashedBytes)
+
+		if err := userRepo.UpdatePassword(c.Request().Context(), userID, hashedPassword); err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to update password")
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{
+			"message": "Password changed successfully",
+		}, nil)
 	})
 
 	// GET /api/v1/me/quota
