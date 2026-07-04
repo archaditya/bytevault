@@ -159,7 +159,12 @@ func (h *FileHandler) Download(c echo.Context) error {
 	}
 	defer stream.Close()
 
-	c.Response().Header().Set(echo.HeaderContentDisposition, "attachment; filename="+fileMeta.Filename)
+	disposition := "attachment"
+	if c.QueryParam("inline") == "true" {
+		disposition = "inline"
+	}
+
+	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
 	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
 	c.Response().WriteHeader(http.StatusOK)
 
@@ -176,7 +181,12 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	}
 	defer stream.Close()
 
-	c.Response().Header().Set(echo.HeaderContentDisposition, "inline; filename="+fileMeta.Filename)
+	disposition := "attachment"
+	if c.QueryParam("inline") == "true" {
+		disposition = "inline"
+	}
+
+	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
 	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
 	c.Response().WriteHeader(http.StatusOK)
 

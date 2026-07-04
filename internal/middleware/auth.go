@@ -10,22 +10,31 @@ import (
 )
 
 // Auth validates the JWT token and sets user_id, role, and permissions in context.
-// All three values are available to handlers via c.Get("user_id"), c.Get("role"), c.Get("permissions")
 func Auth(authService *service.AuthService) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			var token string
+			
+			// 1. Try to get token from Authorization header
 			authHeader := c.Request().Header.Get("Authorization")
-			if authHeader == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header required"})
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && parts[0] == "Bearer" {
+					token = parts[1]
+				}
 			}
 
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Invalid authorization format"})
+			// 2. Fallback to token query parameter (useful for iframe previews and downloads)
+			if token == "" {
+				token = c.QueryParam("token")
+			}
+
+			if token == "" {
+				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header or token query parameter required"})
 			}
 
 			// ValidateAccessToken now returns userID, role, and permissions
-			claims, err := authService.ValidateAccessToken(parts[1])
+			claims, err := authService.ValidateAccessToken(token)
 			if err != nil {
 				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Invalid or expired token"})
 			}

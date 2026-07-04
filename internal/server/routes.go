@@ -65,7 +65,7 @@ func (s *Server) registerRoutes() {
 	// Protected routes (JWT required)
 	authMiddleware := appMiddleware.Auth(authService)
 	protected := v1.Group("", authMiddleware)
-	s.registerUserRoutes(protected, userRepo, deviceRepo, sessionRepo, fileRepo)
+	s.registerUserRoutes(protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
 	s.registerFolderRoutes(protected, folderHandler)
 
 	// Admin routes (JWT + admin permissions required)
