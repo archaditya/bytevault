@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -93,20 +92,17 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to upload avatar to storage: "+err.Error())
 		}
 
-		// Generate the URL/Download link for the avatar
-		avatarURL, err := store.GeneratePresignedDownloadURL(c.Request().Context(), storageKey, 365*24*time.Hour)
-		if err != nil {
-			return handler.SendError(c, http.StatusInternalServerError, "Failed to generate download URL for avatar")
-		}
-
-		// Update database
-		if err := userRepo.UpdateAvatarURL(c.Request().Context(), userID, avatarURL); err != nil {
+				// Update database with the storage key
+		if err := userRepo.UpdateAvatarURL(c.Request().Context(), userID, storageKey); err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to save avatar path to user profile")
 		}
 
+		// Return proxy URL
+		proxyURL := "/api/v1/users/" + userID + "/avatar"
+
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{
 			"message":    "Avatar uploaded successfully",
-			"avatar_url": avatarURL,
+			"avatar_url": proxyURL,
 		}, nil)
 	})
 

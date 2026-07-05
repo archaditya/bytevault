@@ -11,11 +11,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `koanf:"server"`
-	Database DatabaseConfig `koanf:"db"`
-	App      AppConfig      `koanf:"app"`
-	JWT      JWTConfig      `koanf:"jwt"`
-	Storage  StorageConfig  `koanf:"storage"`
+	Server       ServerConfig       `koanf:"server"`
+	Database     DatabaseConfig     `koanf:"db"`
+	App          AppConfig          `koanf:"app"`
+	JWT          JWTConfig          `koanf:"jwt"`
+	Storage      StorageConfig      `koanf:"storage"`
+	Redis        RedisConfig        `koanf:"redis"`
+	Notification NotificationConfig `koanf:"notification"`
 }
 
 type StorageConfig struct {
@@ -26,6 +28,40 @@ type StorageConfig struct {
 	R2AccessKeyID     string `koanf:"r2accesskeyid"`
 	R2SecretAccessKey string `koanf:"r2secretaccesskey"`
 	R2Bucket          string `koanf:"r2bucket"`
+}
+
+type RedisConfig struct {
+	Host     string `koanf:"host"`
+	Port     string `koanf:"port"`
+	Password string `koanf:"password"`
+	DB       int    `koanf:"db"`
+}
+
+func (r RedisConfig) Addr() string {
+	host := r.Host
+	if host == "" {
+		host = "localhost"
+	}
+	port := r.Port
+	if port == "" {
+		port = "6379"
+	}
+	return host + ":" + port
+}
+
+type BrevoConfig struct {
+	APIKey      string `koanf:"apikey"`
+	SenderName  string `koanf:"sendername"`
+	SenderEmail string `koanf:"senderemail"`
+}
+
+type FirebaseConfig struct {
+	CredentialsFile string `koanf:"credentialsFile"`
+}
+
+type NotificationConfig struct {
+	Brevo    BrevoConfig    `koanf:"brevo"`
+	Firebase FirebaseConfig `koanf:"firebase"`
 }
 
 type ServerConfig struct {
@@ -63,10 +99,17 @@ type JWTConfig struct {
 func Load() (*Config, error) {
 	k := koanf.New(".")
 
-	// Custom key transformer: splits only on the first underscore
-	// e.g., STORAGE_R2_ENDPOINT -> storage.r2endpoint
+	// Custom key transformer: binds nested prefixes correctly
+	// e.g., NOTIFICATION_BREVO_APIKEY -> notification.brevo.apikey
+	//       STORAGE_R2_ENDPOINT -> storage.r2endpoint
 	transformKey := func(s string) string {
 		s = strings.ToLower(s)
+		if strings.HasPrefix(s, "notification_brevo_") {
+			return "notification.brevo." + strings.Replace(s[len("notification_brevo_"):], "_", "", -1)
+		}
+		if strings.HasPrefix(s, "notification_firebase_") {
+			return "notification.firebase." + strings.Replace(s[len("notification_firebase_"):], "_", "", -1)
+		}
 		parts := strings.SplitN(s, "_", 2)
 		if len(parts) == 2 {
 			return parts[0] + "." + strings.Replace(parts[1], "_", "", -1)

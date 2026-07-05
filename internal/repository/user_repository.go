@@ -25,13 +25,13 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 
 func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.User, error) {
 	query := `
-		INSERT INTO users (email, password, first_name, last_name)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO users (email, password, first_name, last_name, avatar_url, is_verified)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, email, password, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at, deleted_at
 	`
 
 	var created model.User
-	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName).Scan(
+	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName, user.AvatarURL, user.IsVerified).Scan(
 		&created.ID,
 		&created.Email,
 		&created.Password,
@@ -47,7 +47,7 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create user: %w", err)
 	}
-
+	created.HasPassword = created.Password != nil
 	return &created, nil
 }
 
@@ -78,7 +78,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 		}
 		return nil, fmt.Errorf("failed to find user by email: %w", err)
 	}
-
+	user.HasPassword = user.Password != nil
 	return &user, nil
 }
 
@@ -109,7 +109,7 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*model.User, 
 		}
 		return nil, fmt.Errorf("failed to find user by id: %w", err)
 	}
-
+	user.HasPassword = user.Password != nil
 	return &user, nil
 }
 
@@ -252,4 +252,12 @@ func (r *UserRepository) GetUserStorageStats(ctx context.Context, userID string)
 	var totalStorage int64
 	err := r.db.QueryRow(ctx, "SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM files WHERE user_id = $1 AND deleted_at IS NULL AND status = 'READY'", userID).Scan(&totalFiles, &totalStorage)
 	return totalFiles, totalStorage, err
+}
+
+func (r *UserRepository) MarkVerified(ctx context.Context, userID string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE users SET is_verified = true, updated_at = NOW() WHERE id = $1`,
+		userID,
+	)
+	return err
 }
