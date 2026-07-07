@@ -1,15 +1,32 @@
-FROM golang:1.25.7-alpine
+# ---------- Builder Stage ----------
+FROM golang:1.25.7-alpine AS builder
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+RUN apk add --no-cache git ca-certificates
 
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-RUN go build -o bytevault ./cmd/api
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+
+RUN go build -ldflags="-s -w" -o bytevault ./cmd/api
+
+# ---------- Runtime Stage ----------
+FROM alpine:3.22
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=builder /app/bytevault .
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+CMD wget --spider -q http://localhost:8080/api/v1/health || exit 1
 
 CMD ["./bytevault"]

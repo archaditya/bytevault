@@ -218,3 +218,95 @@ func (h *NotificationHandler) ResetPassword(c echo.Context) error {
 		"message": "Password reset successfully",
 	}, nil)
 }
+
+// POST /api/v1/notifications/admin/send
+func (h *NotificationHandler) SendAdminNotification(c echo.Context) error {
+	var req struct {
+		TargetType string   `json:"target_type" query:"target_type"`
+		UserID     string   `json:"user_id" query:"user_id"`
+		Role       string   `json:"role" query:"role"`
+		Title      string   `json:"title" query:"title"`
+		Body       string   `json:"body" query:"body"`
+		Channels   []string `json:"channels" query:"channels"`
+		Priority   string   `json:"priority" query:"priority"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "Invalid request payload")
+	}
+
+	// Bind query parameters fallback for POST query string inputs
+	if req.TargetType == "" {
+		req.TargetType = c.QueryParam("target_type")
+	}
+	if req.UserID == "" {
+		req.UserID = c.QueryParam("user_id")
+	}
+	if req.Role == "" {
+		req.Role = c.QueryParam("role")
+	}
+	if req.Title == "" {
+		req.Title = c.QueryParam("title")
+	}
+	if req.Body == "" {
+		req.Body = c.QueryParam("body")
+	}
+	if req.Priority == "" {
+		req.Priority = c.QueryParam("priority")
+	}
+	if len(req.Channels) == 0 {
+		req.Channels = c.QueryParams()["channels"]
+	}
+
+	if req.TargetType == "" || req.Title == "" || req.Body == "" {
+		return SendError(c, http.StatusBadRequest, "target_type, title, and body are required")
+	}
+	if len(req.Channels) == 0 {
+		return SendError(c, http.StatusBadRequest, "At least one delivery channel is required")
+	}
+	if req.Priority == "" {
+		req.Priority = "normal"
+	}
+
+	sentCount, notifIDs, err := h.notifService.SendAdminNotification(
+		c.Request().Context(),
+		req.TargetType,
+		req.UserID,
+		req.Role,
+		req.Title,
+		req.Body,
+		req.Channels,
+		req.Priority,
+	)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"message":          "Notification sent successfully",
+		"sent_count":       sentCount,
+		"notification_ids": notifIDs,
+	}, nil)
+}
+
+// GET /api/v1/admin/notifications
+func (h *NotificationHandler) ListAllNotifications(c echo.Context) error {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	offset, _ := strconv.Atoi(c.QueryParam("offset"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	notifications, total, err := h.notifService.ListAllNotifications(c.Request().Context(), limit, offset)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to load notifications")
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"notifications": notifications,
+		"total":         total,
+	}, nil)
+}

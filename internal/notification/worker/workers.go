@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	firebase "firebase.google.com/go/v4"
@@ -239,19 +238,6 @@ func (wp *WorkerPool) retryJob(job *queue.Job, lastErr error) {
 			Int("retries", job.Retries).
 			Str("last_error", job.LastError).
 			Msg("Job failed permanently after max retries")
-
-		// Persist failure as in-app notification for audit
-		if wp.notifRepo != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			wp.notifRepo.Create(ctx, &model.Notification{
-				UserID:  job.UserID,
-				Type:    "system.delivery_failed",
-				Title:   "Notification delivery failed",
-				Body:    fmt.Sprintf("Failed to deliver %s notification after %d attempts: %s", job.Type, job.Retries, job.LastError),
-				Channel: "in_app",
-			})
-		}
 		return
 	}
 

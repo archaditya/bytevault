@@ -2,12 +2,12 @@ package server
 
 import (
 	"github.com/archaditya/bytevault/internal/handler"
+	appMiddleware "github.com/archaditya/bytevault/internal/middleware"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/service"
 )
 
 // registerAuthRoutes adds all /auth/* endpoints.
-// These are public — register, login, refresh, logout, verify-email, resend-otp don't need a token.
 func (s *Server) registerAuthRoutes(v1 *Group, authService *service.AuthService, notifHandler *handler.NotificationHandler, userRepo *repository.UserRepository) {
 	authHandler := handler.NewAuthHandler(authService, userRepo)
 
@@ -18,8 +18,6 @@ func (s *Server) registerAuthRoutes(v1 *Group, authService *service.AuthService,
 	auth.POST("/logout", authHandler.Logout)
 	auth.POST("/google", authHandler.GoogleLogin)
 
-
-	// OTP verification (public — user isn't authenticated yet)
 	auth.POST("/verify-email", notifHandler.VerifyEmail)
 	auth.POST("/resend-otp", notifHandler.ResendOTP)
 	auth.POST("/forgot-password", notifHandler.ForgotPassword)
@@ -32,4 +30,8 @@ func (s *Server) registerNotificationRoutes(protected *Group, notifHandler *hand
 	protected.POST("/notifications/:id/read", notifHandler.MarkAsRead)
 	protected.POST("/notifications/read-all", notifHandler.MarkAllAsRead)
 	protected.POST("/push-tokens", notifHandler.RegisterPushToken)
+
+	// Admin Broadcast & Logs
+	protected.POST("/notifications/admin/send", notifHandler.SendAdminNotification, appMiddleware.RequirePermission("admin:users"))
+	protected.GET("/admin/notifications", notifHandler.ListAllNotifications, appMiddleware.RequirePermission("admin:users"))
 }

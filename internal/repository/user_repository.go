@@ -25,14 +25,19 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 }
 
 func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.User, error) {
+	status := "active"
+	if user.Status != nil {
+		status = *user.Status
+	}
+
 	query := `
-		INSERT INTO users (email, password, first_name, last_name, avatar_url, is_verified)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO users (email, password, first_name, last_name, avatar_url, is_verified, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, email, password, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at, deleted_at
 	`
 
 	var created model.User
-	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName, user.AvatarURL, user.IsVerified).Scan(
+	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName, user.AvatarURL, user.IsVerified, status).Scan(
 		&created.ID,
 		&created.Email,
 		&created.Password,
@@ -174,7 +179,8 @@ func (r *UserRepository) GetStats(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND status != 'inactive'").Scan(&activeUsers)
+	// Treat NULL status as active
+	err = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND (status IS NULL OR status != 'inactive')").Scan(&activeUsers)
 	if err != nil {
 		return nil, err
 	}
@@ -287,4 +293,47 @@ func (r *UserRepository) PurgeDeletedUserFiles(ctx context.Context, cutoff time.
 		keys = append(keys, key)
 	}
 	return keys, nil
+}
+
+func (r *UserRepository) ListAllActiveIDs(ctx context.Context) ([]string, error) {
+	// Treat NULL status as active
+	query := `SELECT id FROM users WHERE deleted_at IS NULL AND (status IS NULL OR status != 'inactive')`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *UserRepository) FindUserIDsByRole(ctx context.Context, roleName string) ([]string, error) {
+	query := `
+		SELECT ur.user_id 
+		FROM user_roles ur 
+		JOIN roles r ON ur.role_id = r.id 
+		JOIN users u ON ur.user_id = u.id
+		WHERE r.name = $1 AND u.deleted_at IS NULL AND (u.status IS NULL OR u.status != 'inactive')
+	`
+	rows, err := r.db.Query(ctx, query, roleName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }

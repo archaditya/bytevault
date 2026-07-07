@@ -255,3 +255,130 @@ func (s *NotificationService) ResetPassword(ctx context.Context, email, otp, new
 	// Update password
 	return s.userRepo.UpdatePassword(ctx, user.ID, string(hashedBytes))
 }
+
+// ListAllNotifications paginates all system notifications for administrators.
+func (s *NotificationService) ListAllNotifications(ctx context.Context, limit, offset int) ([]model.Notification, int, error) {
+	return s.notifRepo.ListAll(ctx, limit, offset)
+}
+
+// SendAdminNotification broadcasts or targets a notification through specified channels.
+func (s *NotificationService) SendAdminNotification(
+	ctx context.Context,
+	targetType string,
+	targetUserID string,
+	targetRole string,
+	title string,
+	body string,
+	channels []string,
+	priority string,
+) (int, []string, error) {
+	// 1. Resolve targeted users
+	var userIDs []string
+	var err error
+
+	switch targetType {
+	case "single":
+		if targetUserID == "" {
+			return 0, nil, fmt.Errorf("target user_id is required for single target type")
+		}
+		userIDs = append(userIDs, targetUserID)
+	case "role":
+		if targetRole == "" {
+			return 0, nil, fmt.Errorf("target role is required for role target type")
+		}
+		userIDs, err = s.userRepo.FindUserIDsByRole(ctx, targetRole)
+		if err != nil {
+			return 0, nil, fmt.Errorf("failed to fetch users by role: %w", err)
+		}
+	case "global":
+		userIDs, err = s.userRepo.ListAllActiveIDs(ctx)
+		if err != nil {
+			return 0, nil, fmt.Errorf("failed to fetch all users: %w", err)
+		}
+	default:
+		return 0, nil, fmt.Errorf("invalid target type: %s", targetType)
+	}
+
+	if len(userIDs) == 0 {
+		return 0, nil, nil
+	}
+
+	// 2. Queue notifications for each user & channel
+	var notificationIDs []string
+	sentCount := 0
+
+	for _, uID := range userIDs {
+		u, err := s.userRepo.FindByID(ctx, uID)
+		if err != nil {
+			continue // skip if user not found or deleted
+		}
+
+		firstName := ""
+		if u.FirstName != nil {
+			firstName = *u.FirstName
+		}
+
+		for _, ch := range channels {
+			jobID := fmt.Sprintf("job_admin_%s_%d", ch, time.Now().UnixNano())
+			notificationIDs = append(notificationIDs, jobID)
+
+			switch ch {
+			case "in_app":
+				job := &queue.Job{
+					ID:        jobID,
+					Type:      queue.JobTypeInApp,
+					UserID:    uID,
+					Priority:  priority,
+					CreatedAt: time.Now(),
+					Payload: map[string]any{
+						"type":  "admin.notification",
+						"title": title,
+						"body":  body,
+						"metadata": map[string]any{
+							"priority": priority,
+							"sender":   "admin",
+						},
+					},
+				}
+				if s.queue != nil {
+					_ = s.queue.Enqueue(ctx, job)
+				}
+			case "push":
+				job := &queue.Job{
+					ID:        jobID,
+					Type:      queue.JobTypePush,
+					UserID:    uID,
+					Priority:  priority,
+					CreatedAt: time.Now(),
+					Payload: map[string]any{
+						"title": title,
+						"body":  body,
+					},
+				}
+				if s.queue != nil {
+					_ = s.queue.Enqueue(ctx, job)
+				}
+			case "email":
+				job := &queue.Job{
+					ID:        jobID,
+					Type:      queue.JobTypeEmail,
+					UserID:    uID,
+					Priority:  priority,
+					CreatedAt: time.Now(),
+					Payload: map[string]any{
+						"to_email":  u.Email,
+						"to_name":   firstName,
+						"subject":   title,
+						"html_body": fmt.Sprintf("<p>%s</p>", body),
+					},
+				}
+				if s.queue != nil {
+					_ = s.queue.Enqueue(ctx, job)
+				}
+			}
+		}
+		sentCount++
+	}
+
+	return sentCount, notificationIDs, nil
+}
