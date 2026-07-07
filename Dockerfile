@@ -20,13 +20,13 @@ FROM alpine:3.22
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates wget
+RUN apk add --no-cache ca-certificates curl
 
 COPY --from=builder /app/bytevault .
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-CMD wget --spider -q http://localhost:8080/api/v1/health || exit 1
+CMD curl -fsS http://localhost:8080/api/v1/health > /dev/null || exit 1
 
 CMD ["./bytevault"]
