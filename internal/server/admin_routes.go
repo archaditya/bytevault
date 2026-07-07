@@ -36,15 +36,19 @@ func (s *Server) registerAdminRoutes(
 		return handler.SendSuccess(c, http.StatusOK, stats, nil)
 	}, appMiddleware.RequirePermission("admin:users"))
 
-	// GET /api/v1/admin/users?page=1&limit=20
+	// GET /api/v1/admin/users?page=1&limit=20&q=&status=&role=
 	admin.GET("/users", func(c echo.Context) error {
 		page, _ := strconv.Atoi(c.QueryParam("page"))
 		limit, _ := strconv.Atoi(c.QueryParam("limit"))
+		search := c.QueryParam("q")
+		status := c.QueryParam("status")
+		role := c.QueryParam("role")
+
 		if page < 1 { page = 1 }
 		if limit < 1 { limit = 20 }
 		offset := (page - 1) * limit
 
-		users, total, err := userRepo.ListAll(c.Request().Context(), limit, offset)
+		users, total, err := userRepo.ListAll(c.Request().Context(), search, status, role, limit, offset)
 		if err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to list users")
 		}
@@ -53,9 +57,9 @@ func (s *Server) registerAdminRoutes(
 		var enriched []map[string]any
 		for _, u := range users {
 			roleName := "user"
-			role, err := roleRepo.GetUserRole(c.Request().Context(), u.ID)
+			roleInfo, err := roleRepo.GetUserRole(c.Request().Context(), u.ID)
 			if err == nil {
-				roleName = role.Name
+				roleName = roleInfo.Name
 			}
 			enriched = append(enriched, map[string]any{
 				"id":          u.ID,
@@ -215,39 +219,37 @@ func (s *Server) registerAdminRoutes(
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"logs": logs}, pagination)
 	}, appMiddleware.RequirePermission("admin:activity"))
 
-		// GET /api/v1/admin/files?page=1&limit=20
+	// GET /api/v1/admin/files?q=&limit=20&cursor=
 	admin.GET("/files", func(c echo.Context) error {
-		page, _ := strconv.Atoi(c.QueryParam("page"))
+		search := c.QueryParam("q")
 		limit, _ := strconv.Atoi(c.QueryParam("limit"))
-		if page < 1 { page = 1 }
+		cursor := c.QueryParam("cursor")
 		if limit < 1 { limit = 20 }
-		offset := (page - 1) * limit
 
-		files, total, err := fileRepo.ListAllFiles(c.Request().Context(), limit, offset)
+		files, nextCursor, err := fileRepo.ListAllFiles(c.Request().Context(), search, limit, cursor)
 		if err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to list files")
 		}
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"files": files}, handler.PaginationMetadata{
-			Total: total, Limit: limit, Page: page,
+			Limit: limit, NextCursor: nextCursor,
 		})
 	}, appMiddleware.RequirePermission("admin:users"))
 
-	// GET /api/v1/admin/files/shared?page=1&limit=20
+	// GET /api/v1/admin/files/shared?q=&limit=20&cursor=
 	admin.GET("/files/shared", func(c echo.Context) error {
-		page, _ := strconv.Atoi(c.QueryParam("page"))
+		search := c.QueryParam("q")
 		limit, _ := strconv.Atoi(c.QueryParam("limit"))
-		if page < 1 { page = 1 }
+		cursor := c.QueryParam("cursor")
 		if limit < 1 { limit = 20 }
-		offset := (page - 1) * limit
 
-		files, total, err := fileRepo.ListAllSharedFiles(c.Request().Context(), limit, offset)
+		files, nextCursor, err := fileRepo.ListAllSharedFiles(c.Request().Context(), search, limit, cursor)
 		if err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to list shared files")
 		}
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"files": files}, handler.PaginationMetadata{
-			Total: total, Limit: limit, Page: page,
+			Limit: limit, NextCursor: nextCursor,
 		})
 	}, appMiddleware.RequirePermission("admin:users"))
 

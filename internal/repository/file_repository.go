@@ -247,22 +247,46 @@ func (r *FileRepository) PurgeSoftDeletedBefore(ctx context.Context, cutoff time
 	return keys, nil
 }
 
-// ListAllFiles returns all files across all users (admin use)
-func (r *FileRepository) ListAllFiles(ctx context.Context, limit, offset int) ([]*model.File, int, error) {
-	var total int
-	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND status = 'READY'").Scan(&total)
-	if err != nil {
-		return nil, 0, err
+// ListAllFiles returns all files across all users (admin use) with search and cursor pagination
+func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit int, cursor string) ([]*model.File, string, error) {
+	var conditions []string
+	var args []any
+	argIndex := 1
+
+	conditions = append(conditions, "deleted_at IS NULL")
+	conditions = append(conditions, "status = 'READY'")
+
+	if search != "" {
+		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
+		args = append(args, "%"+search+"%")
+		argIndex++
+	}
+
+	if cursor != "" {
+		cursorTime, err := time.Parse(time.RFC3339, cursor)
+		if err == nil {
+			conditions = append(conditions, fmt.Sprintf("created_at < $%d", argIndex))
+			args = append(args, cursorTime)
+			argIndex++
+		}
 	}
 
 	query := `
 		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
-		FROM files WHERE deleted_at IS NULL AND status = 'READY'
-		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+		FROM files
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Query(ctx, query, limit, offset)
+
+	limitVal := 20
+	if limit > 0 {
+		limitVal = limit
+	}
+	query += fmt.Sprintf(" LIMIT %d", limitVal)
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -270,29 +294,60 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, limit, offset int) ([
 	for rows.Next() {
 		var f model.File
 		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt); err != nil {
-			return nil, 0, err
+			return nil, "", err
 		}
 		files = append(files, &f)
 	}
-	return files, total, nil
+
+	nextCursor := ""
+	if len(files) == limitVal && len(files) > 0 {
+		nextCursor = files[len(files)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	return files, nextCursor, nil
 }
 
-// ListAllSharedFiles returns all publicly shared files across all users (admin use)
-func (r *FileRepository) ListAllSharedFiles(ctx context.Context, limit, offset int) ([]*model.File, int, error) {
-	var total int
-	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND status = 'READY' AND is_public = true").Scan(&total)
-	if err != nil {
-		return nil, 0, err
+// ListAllSharedFiles returns all publicly shared files across all users (admin use) with search and cursor pagination
+func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, limit int, cursor string) ([]*model.File, string, error) {
+	var conditions []string
+	var args []any
+	argIndex := 1
+
+	conditions = append(conditions, "deleted_at IS NULL")
+	conditions = append(conditions, "status = 'READY'")
+	conditions = append(conditions, "is_public = true")
+
+	if search != "" {
+		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
+		args = append(args, "%"+search+"%")
+		argIndex++
+	}
+
+	if cursor != "" {
+		cursorTime, err := time.Parse(time.RFC3339, cursor)
+		if err == nil {
+			conditions = append(conditions, fmt.Sprintf("created_at < $%d", argIndex))
+			args = append(args, cursorTime)
+			argIndex++
+		}
 	}
 
 	query := `
 		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
-		FROM files WHERE deleted_at IS NULL AND status = 'READY' AND is_public = true
-		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+		FROM files
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Query(ctx, query, limit, offset)
+
+	limitVal := 20
+	if limit > 0 {
+		limitVal = limit
+	}
+	query += fmt.Sprintf(" LIMIT %d", limitVal)
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 	defer rows.Close()
 
@@ -300,9 +355,16 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, limit, offset i
 	for rows.Next() {
 		var f model.File
 		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt); err != nil {
-			return nil, 0, err
+			return nil, "", err
 		}
 		files = append(files, &f)
 	}
-	return files, total, nil
+
+	nextCursor := ""
+	if len(files) == limitVal && len(files) > 0 {
+		nextCursor = files[len(files)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	return files, nextCursor, nil
 }
+
