@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -138,19 +139,59 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string, deletedBy st
 	return nil
 }
 
-func (r *UserRepository) ListAll(ctx context.Context, limit, offset int) ([]model.User, int, error) {
+func (r *UserRepository) ListAll(ctx context.Context, search string, status string, role string, limit, offset int) ([]model.User, int, error) {
+	var conditions []string
+	var args []any
+	argIndex := 1
+
+	conditions = append(conditions, "u.deleted_at IS NULL")
+
+	if search != "" {
+		conditions = append(conditions, fmt.Sprintf("(u.email ILIKE $%d OR u.first_name ILIKE $%d OR u.last_name ILIKE $%d)", argIndex, argIndex, argIndex))
+		args = append(args, "%"+search+"%")
+		argIndex++
+	}
+
+	if status != "" {
+		conditions = append(conditions, fmt.Sprintf("u.status = $%d", argIndex))
+		args = append(args, status)
+		argIndex++
+	}
+
+	if role != "" {
+		conditions = append(conditions, fmt.Sprintf("r.name = $%d", argIndex))
+		args = append(args, role)
+		argIndex++
+	}
+
+	// Count query
+	countQuery := `
+		SELECT COUNT(DISTINCT u.id)
+		FROM users u
+		LEFT JOIN user_roles ur ON u.id = ur.user_id
+		LEFT JOIN roles r ON ur.role_id = r.id
+		WHERE ` + strings.Join(conditions, " AND ")
+
 	var total int
-	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").Scan(&total)
+	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count users: %w", err)
 	}
 
+	// Data query
 	query := `
-		SELECT id, email, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at
-		FROM users WHERE deleted_at IS NULL
-		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+		SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.is_verified, u.status, u.created_at, u.updated_at
+		FROM users u
+		LEFT JOIN user_roles ur ON u.id = ur.user_id
+		LEFT JOIN roles r ON ur.role_id = r.id
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY u.created_at DESC
 	`
-	rows, err := r.db.Query(ctx, query, limit, offset)
+
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list users: %w", err)
 	}
