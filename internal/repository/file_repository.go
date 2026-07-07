@@ -224,3 +224,85 @@ func (r *FileRepository) SoftDelete(ctx context.Context, id string) error {
 	_, err := r.db.Exec(ctx, query, id)
 	return err
 }
+
+
+// PurgeSoftDeletedBefore hard-deletes file records soft-deleted before the cutoff.
+// Returns storage keys so the caller can remove objects from the storage provider.
+func (r *FileRepository) PurgeSoftDeletedBefore(ctx context.Context, cutoff time.Time) ([]string, error) {
+	query := `DELETE FROM files WHERE deleted_at IS NOT NULL AND deleted_at < $1 RETURNING storage_key`
+	rows, err := r.db.Query(ctx, query, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to purge soft-deleted files: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+// ListAllFiles returns all files across all users (admin use)
+func (r *FileRepository) ListAllFiles(ctx context.Context, limit, offset int) ([]*model.File, int, error) {
+	var total int
+	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND status = 'READY'").Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query := `
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
+		FROM files WHERE deleted_at IS NULL AND status = 'READY'
+		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var f model.File
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		files = append(files, &f)
+	}
+	return files, total, nil
+}
+
+// ListAllSharedFiles returns all publicly shared files across all users (admin use)
+func (r *FileRepository) ListAllSharedFiles(ctx context.Context, limit, offset int) ([]*model.File, int, error) {
+	var total int
+	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL AND status = 'READY' AND is_public = true").Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query := `
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
+		FROM files WHERE deleted_at IS NULL AND status = 'READY' AND is_public = true
+		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var f model.File
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt); err != nil {
+			return nil, 0, err
+		}
+		files = append(files, &f)
+	}
+	return files, total, nil
+}

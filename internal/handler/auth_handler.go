@@ -8,16 +8,21 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/archaditya/bytevault/internal/service"
+	"github.com/archaditya/bytevault/internal/repository"
 )
 
 type AuthHandler struct {
 	authService *service.AuthService
+	userRepo    *repository.UserRepository
 }
 
-func NewAuthHandler(authservice *service.AuthService) *AuthHandler {
-	return &AuthHandler{
-		authService: authservice,
+func NewAuthHandler(authservice *service.AuthService, userRepo ...*repository.UserRepository) *AuthHandler {
+	h := &AuthHandler{authService: authservice}
+
+	if len(userRepo) > 0 {
+		h.userRepo = userRepo[0]
 	}
+	return h
 }
 
 // POST /api/v1/auth/register
@@ -129,5 +134,32 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 
 	return SendSuccess(c, http.StatusOK, map[string]any{
 		"message": "Logged out successfully",
+	}, nil)
+}
+
+// POST /api/v1/auth/google
+func (h *AuthHandler) GoogleLogin(c echo.Context) error {
+	var req struct {
+		IDToken   string  `json:"id_token"`
+		FirstName *string `json:"first_name"`
+		LastName  *string `json:"last_name"`
+		AvatarURL *string `json:"avatar_url"`
+	}
+	if err := c.Bind(&req); err != nil || req.IDToken == "" {
+		return SendError(c, http.StatusBadRequest, "Google ID token is required")
+	}
+
+	ip := c.RealIP()
+	ua := c.Request().UserAgent()
+
+	// Pass frontend profile details as a fallback to the auth service
+	user, tokens, err := h.authService.GoogleLogin(c.Request().Context(), req.IDToken, req.FirstName, req.LastName, req.AvatarURL, &ua, &ip)
+	if err != nil {
+		return SendError(c, http.StatusUnauthorized, fmt.Sprintf("Google login failed: %v", err))
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"user":   user,
+		"tokens": tokens,
 	}, nil)
 }

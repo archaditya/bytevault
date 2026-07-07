@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,6 +20,12 @@ type R2Storage struct {
 }
 
 func NewR2Storage(endpoint, accessKey, secretKey, bucket string) (*R2Storage, error) {
+	// Clean endpoint if it contains the bucket name as a path suffix
+	suffix := "/" + bucket
+	if strings.HasSuffix(endpoint, suffix) {
+		endpoint = strings.TrimSuffix(endpoint, suffix)
+	}
+
 	// 1. Load AWS SDK base configuration with static credentials
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
@@ -28,9 +35,10 @@ func NewR2Storage(endpoint, accessKey, secretKey, bucket string) (*R2Storage, er
 		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
-	// 2. Initialize S3 client using the modern BaseEndpoint options function
+	// 2. Initialize S3 client forcing PathStyle for R2 compatibility
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(endpoint) // Custom endpoint for Cloudflare R2
+		o.UsePathStyle = true                 // CRITICAL: Cloudflare R2 requires path-style addressing
 	})
 	presignClient := s3.NewPresignClient(client)
 

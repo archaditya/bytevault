@@ -2,10 +2,12 @@ package handler
 
 import (
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/archaditya/bytevault/internal/repository"
@@ -104,7 +106,20 @@ func (h *FileHandler) DownloadLocalDirect(c echo.Context) error {
 	}
 	defer file.Close()
 
-	c.Response().Header().Set(echo.HeaderContentDisposition, "attachment; filename="+filepath.Base(storageKey))
+	// 1. Detect Content-Type dynamically from file extension
+	contentType := mime.TypeByExtension(filepath.Ext(storageKey))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Response().Header().Set(echo.HeaderContentType, contentType)
+
+	// 2. Serve images inline so they display in <img>, otherwise attachment download
+	disposition := "attachment"
+	if strings.HasPrefix(contentType, "image/") || c.QueryParam("inline") == "true" {
+		disposition = "inline"
+	}
+
+	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename="+filepath.Base(storageKey))
 	c.Response().WriteHeader(http.StatusOK)
 	_, err = io.Copy(c.Response().Writer, file)
 	return err

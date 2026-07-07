@@ -5,14 +5,19 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/archaditya/bytevault/internal/config"
+	"github.com/archaditya/bytevault/internal/logger"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
 )
@@ -41,6 +46,7 @@ type AuthService struct {
 	sessionRepo  *repository.SessionRepository
 	roleRepo     *repository.RoleRepository
 	activityRepo *repository.ActivityRepository
+	notifService *NotificationService
 	jwtCfg       config.JWTConfig
 }
 
@@ -49,6 +55,7 @@ func NewAuthService(
 	sessionRepo *repository.SessionRepository,
 	roleRepo *repository.RoleRepository,
 	activityRepo *repository.ActivityRepository,
+	notifService *NotificationService,
 	jwtCfg config.JWTConfig,
 ) *AuthService {
 	return &AuthService{
@@ -56,6 +63,7 @@ func NewAuthService(
 		sessionRepo:  sessionRepo,
 		roleRepo:     roleRepo,
 		activityRepo: activityRepo,
+		notifService: notifService,
 		jwtCfg:       jwtCfg,
 	}
 }
@@ -76,8 +84,8 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 	hashedPassword := string(hashedBytes)
 
 	user := &model.User{
-		Email:    email,
-		Password: &hashedPassword,
+		Email:     email,
+		Password:  &hashedPassword,
 		FirstName: &firstName,
 		LastName:  &lastName,
 	}
@@ -104,6 +112,13 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 		IPAddress:    ip,
 		UserAgent:    ua,
 	})
+
+	// Generate and send OTP for email verification
+	if s.notifService != nil {
+		if err := s.notifService.GenerateAndSendOTP(ctx, created.ID, created.Email, firstName, "registration"); err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to send registration verification OTP")
+		}
+	}
 
 	tokens, err := s.createSession(ctx, created.ID, created.RoleName, created.Permissions, nil, nil)
 	if err != nil {
@@ -135,6 +150,13 @@ func (s *AuthService) Login(ctx context.Context, email, password string, userAge
 	if err == nil {
 		user.RoleName = role.Name
 		user.Permissions = role.Permissions
+	}
+
+	// Trigger OTP if user is not verified yet so they receive a fresh code on login
+	if !user.IsVerified && s.notifService != nil {
+		if err := s.notifService.GenerateAndSendOTP(ctx, user.ID, user.Email, *user.FirstName, "registration"); err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to auto-send verification OTP on login")
+		}
 	}
 
 	// Log activity
@@ -235,7 +257,209 @@ func (s *AuthService) ValidateAccessToken(tokenString string) (*TokenClaims, err
 	}, nil
 }
 
+// GoogleLogin verifies a Google ID token and creates or retrieves the user.
+func (s *AuthService) GoogleLogin(
+	ctx context.Context,
+	idToken string,
+	reqFirstName *string,
+	reqLastName *string,
+	reqAvatarURL *string,
+	userAgent *string,
+	ip *string,
+) (*model.User, *TokenPair, error) {
+	// Verify token with Google's tokeninfo endpoint
+	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + idToken)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to verify Google token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, nil, fmt.Errorf("invalid Google token")
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var claims map[string]any
+	if err := json.Unmarshal(body, &claims); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse Google token: %w", err)
+	}
+
+	email, _ := claims["email"].(string)
+	if email == "" {
+		return nil, nil, fmt.Errorf("Google token missing email claim")
+	}
+
+	// 1. Extract profile fields from ID Token claims
+	var firstName, lastName, avatarURL string
+	if val, ok := claims["given_name"].(string); ok {
+		firstName = val
+	}
+	if val, ok := claims["family_name"].(string); ok {
+		lastName = val
+	}
+	if val, ok := claims["picture"].(string); ok {
+		avatarURL = val
+	}
+
+	// Fallback to splitting full "name" claim
+	if firstName == "" {
+		if fullName, ok := claims["name"].(string); ok && fullName != "" {
+			parts := strings.Split(fullName, " ")
+			firstName = parts[0]
+			if len(parts) > 1 {
+				lastName = strings.Join(parts[1:], " ")
+			}
+		}
+	}
+
+	// 2. Fallback to frontend-provided fields if claims were empty
+	if firstName == "" && reqFirstName != nil {
+		firstName = *reqFirstName
+	}
+	if lastName == "" && reqLastName != nil {
+		lastName = *reqLastName
+	}
+	if avatarURL == "" && reqAvatarURL != nil {
+		avatarURL = *reqAvatarURL
+	}
+
+	var isEmailVerified bool
+	if val, ok := claims["email_verified"]; ok {
+		switch v := val.(type) {
+		case bool:
+			isEmailVerified = v
+		case string:
+			isEmailVerified = (v == "true")
+		}
+	}
+
+	// Check if user exists
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err != nil {
+		if !errors.Is(err, repository.ErrUserNotFound) {
+			return nil, nil, err
+		}
+
+		// Create a temporary random password
+		tempPass := make([]byte, 16)
+		if _, randErr := rand.Read(tempPass); randErr != nil {
+			return nil, nil, fmt.Errorf("failed to generate secure temp password: %w", randErr)
+		}
+		tempPassword := hex.EncodeToString(tempPass)
+		hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), 14)
+		hashedPassword := string(hashedBytes)
+
+		// Create new user (Google account with a secure temporary password)
+		user = &model.User{
+			Email:      email,
+			Password:   &hashedPassword,
+			FirstName:  &firstName,
+			LastName:   &lastName,
+			AvatarURL:  &avatarURL,
+			IsVerified: isEmailVerified,
+		}
+
+		user, err = s.userRepo.Create(ctx, user)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create Google user: %w", err)
+		}
+
+		// Assign default role
+		defaultRole, roleErr := s.roleRepo.FindByName(ctx, "user")
+		if roleErr == nil {
+			s.roleRepo.AssignRoleToUser(ctx, user.ID, defaultRole.ID, nil)
+			user.RoleName = defaultRole.Name
+			user.Permissions = defaultRole.Permissions
+		}
+	} else {
+		// User exists. Sync/Update any empty/default names, avatar or verification status.
+		updated := false
+		if (user.FirstName == nil || *user.FirstName == "" || *user.FirstName == email) && firstName != "" {
+			user.FirstName = &firstName
+			updated = true
+		}
+		if (user.LastName == nil || *user.LastName == "") && lastName != "" {
+			user.LastName = &lastName
+			updated = true
+		}
+		if (user.AvatarURL == nil || *user.AvatarURL == "") && avatarURL != "" {
+			user.AvatarURL = &avatarURL
+			updated = true
+		}
+		if !user.IsVerified && isEmailVerified {
+			user.IsVerified = true
+			updated = true
+		}
+
+		if updated {
+			s.userRepo.UpdateDetails(ctx, user.ID, user.FirstName, user.LastName, nil, &user.IsVerified)
+			if user.AvatarURL != nil {
+				s.userRepo.UpdateAvatarURL(ctx, user.ID, *user.AvatarURL)
+			}
+		}
+
+		if user.Password == nil {
+			// Existing Google user with no password yet: generate and assign a temporary password
+			tempPass := make([]byte, 16)
+			if _, randErr := rand.Read(tempPass); randErr == nil {
+				tempPassword := hex.EncodeToString(tempPass)
+				hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), 14)
+				hashedPassword := string(hashedBytes)
+				s.userRepo.UpdatePassword(ctx, user.ID, hashedPassword)
+				user.Password = &hashedPassword
+				user.HasPassword = true
+			}
+		}
+	}
+
+	// Get role info for existing users
+	if user.RoleName == "" {
+		role, roleErr := s.roleRepo.GetUserRole(ctx, user.ID)
+		if roleErr == nil {
+			user.RoleName = role.Name
+			user.Permissions = role.Permissions
+		}
+	}
+
+	// Update avatar if changed
+	if avatarURL != "" && (user.AvatarURL == nil || *user.AvatarURL != avatarURL) {
+		s.userRepo.UpdateAvatarURL(ctx, user.ID, avatarURL)
+		user.AvatarURL = &avatarURL
+	}
+
+	// Log activity
+	s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &user.ID,
+		Action:       "user.google_login",
+		ResourceType: strPtr("session"),
+		IPAddress:    ip,
+		UserAgent:    userAgent,
+	})
+
+	tokens, err := s.createSession(ctx, user.ID, user.RoleName, user.Permissions, userAgent, ip)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return user, tokens, nil
+}
+
 // --- Private helpers ---
+
+// CreateSessionForVerifiedUser creates an authenticated session for a user who just completed email verification.
+// This allows auto-login after OTP verification without requiring a separate login step.
+func (s *AuthService) CreateSessionForVerifiedUser(ctx context.Context, userID, role string, permissions map[string]bool, userAgent, ip *string) (*TokenPair, error) {
+	// Log activity
+	s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &userID,
+		Action:       "user.email_verified",
+		ResourceType: strPtr("session"),
+		IPAddress:    ip,
+		UserAgent:    userAgent,
+	})
+
+	return s.createSession(ctx, userID, role, permissions, userAgent, ip)
+}
 
 func (s *AuthService) createSession(ctx context.Context, userID, role string, permissions map[string]bool, userAgent, ip *string) (*TokenPair, error) {
 	accessDuration, err := time.ParseDuration(s.jwtCfg.AccessExpiry)

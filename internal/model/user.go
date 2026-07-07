@@ -21,6 +21,7 @@ type User struct {
 	ID        string     `json:"id"`
 	Email     string     `json:"email"`
 	Password  *string    `json:"-"` // Never expose in JSON, pointer because nullable
+	HasPassword bool     `json:"has_password"`
 
 	FirstName *string    `json:"first_name"`
 	LastName  *string    `json:"last_name"`
