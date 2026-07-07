@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -260,4 +261,30 @@ func (r *UserRepository) MarkVerified(ctx context.Context, userID string) error 
 		userID,
 	)
 	return err
+}
+
+
+// PurgeDeletedUserFiles removes file records for users soft-deleted before the cutoff.
+// User rows are kept to prevent free-tier quota re-abuse.
+func (r *UserRepository) PurgeDeletedUserFiles(ctx context.Context, cutoff time.Time) ([]string, error) {
+	query := `
+		DELETE FROM files
+		WHERE user_id IN (SELECT id FROM users WHERE deleted_at IS NOT NULL AND deleted_at < $1)
+		RETURNING storage_key
+	`
+	rows, err := r.db.Query(ctx, query, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to purge deleted user files: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }

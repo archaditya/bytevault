@@ -22,6 +22,7 @@ func (s *Server) registerAdminRoutes(
 	roleRepo *repository.RoleRepository,
 	sessionRepo *repository.SessionRepository,
 	activityRepo *repository.ActivityRepository,
+	fileRepo *repository.FileRepository,
 ) {
 	admin := protected.Group("/admin")
 
@@ -213,4 +214,41 @@ func (s *Server) registerAdminRoutes(
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"logs": logs}, pagination)
 	}, appMiddleware.RequirePermission("admin:activity"))
+
+		// GET /api/v1/admin/files?page=1&limit=20
+	admin.GET("/files", func(c echo.Context) error {
+		page, _ := strconv.Atoi(c.QueryParam("page"))
+		limit, _ := strconv.Atoi(c.QueryParam("limit"))
+		if page < 1 { page = 1 }
+		if limit < 1 { limit = 20 }
+		offset := (page - 1) * limit
+
+		files, total, err := fileRepo.ListAllFiles(c.Request().Context(), limit, offset)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to list files")
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{"files": files}, handler.PaginationMetadata{
+			Total: total, Limit: limit, Page: page,
+		})
+	}, appMiddleware.RequirePermission("admin:users"))
+
+	// GET /api/v1/admin/files/shared?page=1&limit=20
+	admin.GET("/files/shared", func(c echo.Context) error {
+		page, _ := strconv.Atoi(c.QueryParam("page"))
+		limit, _ := strconv.Atoi(c.QueryParam("limit"))
+		if page < 1 { page = 1 }
+		if limit < 1 { limit = 20 }
+		offset := (page - 1) * limit
+
+		files, total, err := fileRepo.ListAllSharedFiles(c.Request().Context(), limit, offset)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to list shared files")
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{"files": files}, handler.PaginationMetadata{
+			Total: total, Limit: limit, Page: page,
+		})
+	}, appMiddleware.RequirePermission("admin:users"))
+
 }

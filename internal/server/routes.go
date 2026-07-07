@@ -130,7 +130,8 @@ func (s *Server) registerRoutes() {
 	s.registerNotificationRoutes(protected, notifHandler)
 
 	// Admin routes (JWT + admin permissions required)
-	s.registerAdminRoutes(protected, userRepo, roleRepo, sessionRepo, activityRepo)
+	s.registerAdminRoutes(protected, userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
+
 
 	// File endpoints
 	s.registerFileRoutes(v1, fileHandler, authMiddleware)
@@ -145,7 +146,7 @@ func (s *Server) registerRoutes() {
 		}
 	}
 
-	bgScheduler := scheduler.NewScheduler(verifyRepo, notifRepo)
+	bgScheduler := scheduler.NewScheduler(verifyRepo, notifRepo, fileRepo, userRepo, store)
 	bgScheduler.Start()
 }
 

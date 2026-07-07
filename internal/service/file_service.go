@@ -268,12 +268,8 @@ func (s *FileService) Delete(ctx context.Context, fileID, userID string) error {
 		return fmt.Errorf("unauthorized")
 	}
 
-	if err := s.repo.SoftDelete(ctx, fileID); err != nil {
-		return err
-	}
-
-	_ = s.storage.Delete(ctx, file.StorageKey)
-	return nil
+	// Soft delete only — R2 cleanup happens via scheduler after 30-day cooldown
+	return s.repo.SoftDelete(ctx, fileID)
 }
 
 func (s *FileService) GetFileDetails(ctx context.Context, fileID, userID string) (*model.File, error) {
