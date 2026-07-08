@@ -19,4 +19,9 @@ type File struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	DeletedAt       *time.Time `json:"-"`
+	Downloads       int64      `json:"downloads"`
+
+	// Enriched fields for user/admin views
+	OwnerName       string     `json:"owner_name,omitempty"`
+	OwnerEmail      string     `json:"owner_email,omitempty"`
 }

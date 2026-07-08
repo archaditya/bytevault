@@ -221,6 +221,11 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string) (io.Rea
 		return nil, nil, fmt.Errorf("failed to download from storage: %w", err)
 	}
 
+	// Increment downloads count asynchronously ONLY for public shared downloads
+	go func() {
+		_ = s.repo.IncrementDownloads(context.Background(), file.ID)
+	}()
+
 	return stream, file, nil
 }
 
@@ -281,6 +286,20 @@ func (s *FileService) GetFileDetails(ctx context.Context, fileID, userID string)
 		return nil, fmt.Errorf("file not found")
 	}
 	if file.UserID != userID {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return file, nil
+}
+
+func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*model.File, error) {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
+		return nil, fmt.Errorf("file not found")
+	}
+	if !file.IsPublic {
 		return nil, fmt.Errorf("unauthorized")
 	}
 	return file, nil

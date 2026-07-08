@@ -95,6 +95,9 @@ func (s *Scheduler) cleanup() {
 	s.purgeStorageKeys("deleted-user files", func() ([]string, error) {
 		return s.userRepo.PurgeDeletedUserFiles(ctx, fileCutoff)
 	}, ctx)
+
+	// 5. Purge orphan files and avatar images from storage
+	s.cleanupOrphans(ctx)
 }
 
 func (s *Scheduler) purgeStorageKeys(label string, fetchKeys func() ([]string, error), ctx context.Context) {
@@ -110,6 +113,62 @@ func (s *Scheduler) purgeStorageKeys(label string, fetchKeys func() ([]string, e
 	for _, key := range keys {
 		if delErr := s.store.Delete(ctx, key); delErr != nil {
 			logger.Log.Error().Err(delErr).Str("key", key).Msg("Failed to delete from storage")
+		}
+	}
+}
+
+func (s *Scheduler) cleanupOrphans(ctx context.Context) {
+	logger.Log.Info().Msg("Scheduler running orphan file and image cleanup...")
+
+	// 1. Cleanup orphan avatars
+	activeAvatars, err := s.userRepo.GetAllAvatarURLs(ctx)
+	if err != nil {
+		logger.Log.Error().Err(err).Msg("Failed to retrieve active avatar URLs from database")
+	} else {
+		avatarKeys, err := s.store.List(ctx, "avatars/")
+		if err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to list avatar objects from storage")
+		} else {
+			var orphans []string
+			for _, key := range avatarKeys {
+				if !activeAvatars[key] {
+					orphans = append(orphans, key)
+				}
+			}
+			if len(orphans) > 0 {
+				logger.Log.Info().Int("count", len(orphans)).Msg("Purging orphan avatars from storage")
+				for _, key := range orphans {
+					if delErr := s.store.Delete(ctx, key); delErr != nil {
+						logger.Log.Error().Err(delErr).Str("key", key).Msg("Failed to delete orphan avatar from storage")
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Cleanup orphan files
+	activeFileKeys, err := s.fileRepo.GetAllStorageKeys(ctx)
+	if err != nil {
+		logger.Log.Error().Err(err).Msg("Failed to retrieve active file keys from database")
+	} else {
+		fileKeys, err := s.store.List(ctx, "user/")
+		if err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to list file objects from storage")
+		} else {
+			var orphans []string
+			for _, key := range fileKeys {
+				if !activeFileKeys[key] {
+					orphans = append(orphans, key)
+				}
+			}
+			if len(orphans) > 0 {
+				logger.Log.Info().Int("count", len(orphans)).Msg("Purging orphan files from storage")
+				for _, key := range orphans {
+					if delErr := s.store.Delete(ctx, key); delErr != nil {
+						logger.Log.Error().Err(delErr).Str("key", key).Msg("Failed to delete orphan file from storage")
+					}
+				}
+			}
 		}
 	}
 }

@@ -17,4 +17,6 @@ type StorageProvider interface {
 	GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error)
 	// GeneratePresignedDownloadURL creates a secure temporary URL for downloading private assets
 	GeneratePresignedDownloadURL(ctx context.Context, storageKey string, expiry time.Duration) (string, error)
+	// List returns a list of all storage keys matching the given prefix
+	List(ctx context.Context, prefix string) ([]string, error)
 }

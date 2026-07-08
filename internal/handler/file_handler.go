@@ -187,6 +187,23 @@ func (h *FileHandler) Download(c echo.Context) error {
 	return err
 }
 
+// GET /api/v1/files/public/:id/metadata
+func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
+	fileID := c.Param("id")
+
+	fileMeta, err := h.service.GetPublicMetadata(c.Request().Context(), fileID)
+	if err != nil {
+		return SendError(c, http.StatusNotFound, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"filename":     fileMeta.Filename,
+		"file_size":    fileMeta.FileSize,
+		"content_type": fileMeta.ContentType,
+		"created_at":   fileMeta.CreatedAt,
+	}, nil)
+}
+
 func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	fileID := c.Param("id")
 
@@ -204,6 +221,11 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
 	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
 	c.Response().WriteHeader(http.StatusOK)
+
+	// If HEAD request, do not stream the actual file body
+	if c.Request().Method == http.MethodHead {
+		return nil
+	}
 
 	_, err = io.Copy(c.Response().Writer, stream)
 	return err
@@ -223,6 +245,12 @@ func (h *FileHandler) List(c echo.Context) error {
 	sortDir := c.QueryParam("sort_dir")
 	cursor := c.QueryParam("cursor")
 
+	var isPublic *bool
+	if isPublicStr := c.QueryParam("is_public"); isPublicStr != "" {
+		ip := isPublicStr == "true"
+		isPublic = &ip
+	}
+
 	limit := 20
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -231,13 +259,14 @@ func (h *FileHandler) List(c echo.Context) error {
 	}
 
 	params := repository.ListFilesParams{
-		UserID:   userID,
-		FolderID: folderID,
-		Search:   search,
-		SortBy:   sortBy,
-		SortDir:  sortDir,
-		Limit:    limit,
-		Cursor:   cursor,
+		UserID:     userID,
+		FolderID:   folderID,
+		Search:     search,
+		SortBy:     sortBy,
+		SortDir:    sortDir,
+		Limit:      limit,
+		Cursor:     cursor,
+		IsPublic:   isPublic,
 	}
 
 	files, nextCursor, err := h.service.ListUserFiles(c.Request().Context(), params)

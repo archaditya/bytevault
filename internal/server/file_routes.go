@@ -9,6 +9,8 @@ import (
 func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, authMiddleware echo.MiddlewareFunc) {
 	// Public routes
 	g.GET("/files/public/:id", fh.DownloadPublic)
+	g.HEAD("/files/public/:id", fh.DownloadPublic)
+	g.GET("/files/public/:id/metadata", fh.GetPublicMetadata)
 	
 	// Local storage direct uploads dev endpoints
 	g.PUT("/files/upload/direct", fh.UploadLocalDirect)

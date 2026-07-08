@@ -74,3 +74,30 @@ func (l *LocalStorage) GeneratePresignedDownloadURL(ctx context.Context, storage
 	// Dev environment shortcut: direct file access route
 	return fmt.Sprintf("/api/v1/files/download/direct?key=%s", storageKey), nil
 }
+
+func (l *LocalStorage) List(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	searchDir := filepath.Join(l.baseDir, prefix)
+	if _, err := os.Stat(searchDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+	err := filepath.WalkDir(searchDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			relPath, err := filepath.Rel(l.baseDir, path)
+			if err != nil {
+				return err
+			}
+			// Convert backslashes to forward slashes for cross-platform consistency
+			relPath = filepath.ToSlash(relPath)
+			keys = append(keys, relPath)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list local files: %w", err)
+	}
+	return keys, nil
+}
