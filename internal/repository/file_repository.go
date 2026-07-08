@@ -368,3 +368,22 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	return files, nextCursor, nil
 }
 
+// GetAllStorageKeys returns a map of all active file storage keys.
+func (r *FileRepository) GetAllStorageKeys(ctx context.Context) (map[string]bool, error) {
+	query := `SELECT storage_key FROM files WHERE deleted_at IS NULL`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make(map[string]bool)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err == nil {
+			keys[key] = true
+		}
+	}
+	return keys, nil
+}
+

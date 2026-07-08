@@ -187,6 +187,23 @@ func (h *FileHandler) Download(c echo.Context) error {
 	return err
 }
 
+// GET /api/v1/files/public/:id/metadata
+func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
+	fileID := c.Param("id")
+
+	fileMeta, err := h.service.GetPublicMetadata(c.Request().Context(), fileID)
+	if err != nil {
+		return SendError(c, http.StatusNotFound, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"filename":     fileMeta.Filename,
+		"file_size":    fileMeta.FileSize,
+		"content_type": fileMeta.ContentType,
+		"created_at":   fileMeta.CreatedAt,
+	}, nil)
+}
+
 func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	fileID := c.Param("id")
 
@@ -204,6 +221,11 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
 	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
 	c.Response().WriteHeader(http.StatusOK)
+
+	// If HEAD request, do not stream the actual file body
+	if c.Request().Method == http.MethodHead {
+		return nil
+	}
 
 	_, err = io.Copy(c.Response().Writer, stream)
 	return err

@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -73,6 +74,13 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusBadRequest, "No avatar file provided in form field 'avatar'")
 		}
 
+		// Get current user to check for an existing avatar
+		oldUser, err := userRepo.FindByID(c.Request().Context(), userID)
+		var oldAvatarKey string
+		if err == nil && oldUser != nil && oldUser.AvatarURL != nil {
+			oldAvatarKey = *oldUser.AvatarURL
+		}
+
 		src, err := file.Open()
 		if err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to read avatar file")
@@ -92,9 +100,15 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to upload avatar to storage: "+err.Error())
 		}
 
-				// Update database with the storage key
+		// Update database with the storage key
 		if err := userRepo.UpdateAvatarURL(c.Request().Context(), userID, storageKey); err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to save avatar path to user profile")
+		}
+
+		// Delete old avatar if it exists, is different from the new one, and is not an external URL (doesn't start with http)
+		if oldAvatarKey != "" && oldAvatarKey != storageKey && !strings.HasPrefix(oldAvatarKey, "http") {
+			// Ignore error on delete as the database update succeeded and we don't want to fail the request
+			_ = store.Delete(c.Request().Context(), oldAvatarKey)
 		}
 
 		// Return proxy URL
@@ -105,6 +119,7 @@ func (s *Server) registerUserRoutes(
 			"avatar_url": proxyURL,
 		}, nil)
 	})
+
 
 	// POST /api/v1/me/change-password
 	protected.POST("/me/change-password", func(c echo.Context) error {

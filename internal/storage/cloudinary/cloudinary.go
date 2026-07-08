@@ -116,3 +116,17 @@ func (c *CloudinaryStorage) GeneratePresignedDownloadURL(ctx context.Context, st
 	}
 	return signedURL, nil
 }
+
+func (c *CloudinaryStorage) List(ctx context.Context, prefix string) ([]string, error) {
+	resp, err := c.cld.Admin.Assets(ctx, admin.AssetsParams{
+		Prefix: prefix,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list cloudinary assets: %w", err)
+	}
+	var keys []string
+	for _, asset := range resp.Assets {
+		keys = append(keys, asset.PublicID)
+	}
+	return keys, nil
+}

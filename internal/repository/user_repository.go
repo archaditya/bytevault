@@ -378,3 +378,21 @@ func (r *UserRepository) FindUserIDsByRole(ctx context.Context, roleName string)
 	}
 	return ids, nil
 }
+
+// GetAllAvatarURLs returns a map of all active avatar URLs.
+func (r *UserRepository) GetAllAvatarURLs(ctx context.Context) (map[string]bool, error) {
+	query := `SELECT avatar_url FROM users WHERE avatar_url IS NOT NULL AND deleted_at IS NULL`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	urls := make(map[string]bool)
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err == nil {
+			urls[url] = true
+		}
+	}
+	return urls, nil
+}

@@ -285,3 +285,17 @@ func (s *FileService) GetFileDetails(ctx context.Context, fileID, userID string)
 	}
 	return file, nil
 }
+
+func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*model.File, error) {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
+		return nil, fmt.Errorf("file not found")
+	}
+	if !file.IsPublic {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return file, nil
+}
