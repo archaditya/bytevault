@@ -13,13 +13,14 @@ import (
 )
 
 type ListFilesParams struct {
-	UserID   string
-	FolderID *string
-	Search   string
-	SortBy   string // name, size, date
-	SortDir  string // asc, desc
-	Limit    int
-	Cursor   string // RFC3339 timestamp
+	UserID     string
+	FolderID   *string
+	Search     string
+	SortBy     string // name, size, date
+	SortDir    string // asc, desc
+	Limit      int
+	Cursor     string // RFC3339 timestamp
+	IsPublic   *bool
 }
 
 type FileRepository struct {
@@ -57,7 +58,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -76,6 +77,7 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 		&file.FolderID,
 		&file.CreatedAt,
 		&file.UpdatedAt,
+		&file.Downloads,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -98,8 +100,10 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	conditions = append(conditions, "deleted_at IS NULL")
 	conditions = append(conditions, "status = 'READY'")
 
-	// Folder or Global Search filter
-	if params.Search != "" {
+	// IsPublic, Search, or Folder filter
+	if params.IsPublic != nil && *params.IsPublic {
+		conditions = append(conditions, "is_public = true")
+	} else if params.Search != "" {
 		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
 		args = append(args, "%"+params.Search+"%")
 		argIndex++
@@ -128,7 +132,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ")
 
@@ -178,6 +182,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 			&f.FolderID,
 			&f.CreatedAt,
 			&f.UpdatedAt,
+			&f.Downloads,
 		)
 		if err != nil {
 			return nil, "", err
@@ -272,7 +277,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY created_at DESC
@@ -293,7 +298,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	var files []*model.File
 	for rows.Next() {
 		var f model.File
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads); err != nil {
 			return nil, "", err
 		}
 		files = append(files, &f)
@@ -313,12 +318,12 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	var args []any
 	argIndex := 1
 
-	conditions = append(conditions, "deleted_at IS NULL")
-	conditions = append(conditions, "status = 'READY'")
-	conditions = append(conditions, "is_public = true")
+	conditions = append(conditions, "f.deleted_at IS NULL")
+	conditions = append(conditions, "f.status = 'READY'")
+	conditions = append(conditions, "f.is_public = true")
 
 	if search != "" {
-		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("f.filename ILIKE $%d", argIndex))
 		args = append(args, "%"+search+"%")
 		argIndex++
 	}
@@ -326,17 +331,19 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	if cursor != "" {
 		cursorTime, err := time.Parse(time.RFC3339, cursor)
 		if err == nil {
-			conditions = append(conditions, fmt.Sprintf("created_at < $%d", argIndex))
+			conditions = append(conditions, fmt.Sprintf("f.created_at < $%d", argIndex))
 			args = append(args, cursorTime)
 			argIndex++
 		}
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at
-		FROM files
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads,
+		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
+		FROM files f
+		LEFT JOIN users u ON f.user_id = u.id
 		WHERE ` + strings.Join(conditions, " AND ") + `
-		ORDER BY created_at DESC
+		ORDER BY f.created_at DESC
 	`
 
 	limitVal := 20
@@ -354,7 +361,11 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	var files []*model.File
 	for rows.Next() {
 		var f model.File
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey,
+			&f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID,
+			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.OwnerName, &f.OwnerEmail,
+		); err != nil {
 			return nil, "", err
 		}
 		files = append(files, &f)
@@ -387,3 +398,8 @@ func (r *FileRepository) GetAllStorageKeys(ctx context.Context) (map[string]bool
 	return keys, nil
 }
 
+func (r *FileRepository) IncrementDownloads(ctx context.Context, id string) error {
+	query := `UPDATE files SET downloads = downloads + 1, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, id)
+	return err
+}

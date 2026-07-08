@@ -221,6 +221,11 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string) (io.Rea
 		return nil, nil, fmt.Errorf("failed to download from storage: %w", err)
 	}
 
+	// Increment downloads count asynchronously ONLY for public shared downloads
+	go func() {
+		_ = s.repo.IncrementDownloads(context.Background(), file.ID)
+	}()
+
 	return stream, file, nil
 }
 

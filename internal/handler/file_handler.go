@@ -245,6 +245,12 @@ func (h *FileHandler) List(c echo.Context) error {
 	sortDir := c.QueryParam("sort_dir")
 	cursor := c.QueryParam("cursor")
 
+	var isPublic *bool
+	if isPublicStr := c.QueryParam("is_public"); isPublicStr != "" {
+		ip := isPublicStr == "true"
+		isPublic = &ip
+	}
+
 	limit := 20
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -253,13 +259,14 @@ func (h *FileHandler) List(c echo.Context) error {
 	}
 
 	params := repository.ListFilesParams{
-		UserID:   userID,
-		FolderID: folderID,
-		Search:   search,
-		SortBy:   sortBy,
-		SortDir:  sortDir,
-		Limit:    limit,
-		Cursor:   cursor,
+		UserID:     userID,
+		FolderID:   folderID,
+		Search:     search,
+		SortBy:     sortBy,
+		SortDir:    sortDir,
+		Limit:      limit,
+		Cursor:     cursor,
+		IsPublic:   isPublic,
 	}
 
 	files, nextCursor, err := h.service.ListUserFiles(c.Request().Context(), params)
