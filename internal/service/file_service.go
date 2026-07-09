@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
@@ -144,6 +147,34 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string)
 		return fmt.Errorf("unauthorized")
 	}
 
+	// fetch first 512 bytes from storage for signature validation
+	stream, err := s.storage.Download(ctx, file.StorageKey)
+	if err != nil {
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("failed to download file from storage for validation: %w", err)
+	}
+
+	header := make([]byte, 512)
+	n, readErr := io.ReadFull(stream, header)
+	_ = stream.Close()
+
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		_ = s.storage.Delete(ctx, file.StorageKey)
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("failed to read file header from storage: %w", readErr)
+	}
+	headerBytes := header[:n]
+
+	// sniff actual content-type via magic bytes
+	detectedMime := http.DetectContentType(headerBytes)
+
+	// verify magic bytes /signature compatibility
+	if err := ValidateMagicBytes(detectedMime, file.ContentType, file.Filename); err != nil {
+		_ = s.storage.Delete(ctx, file.StorageKey)
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("upload rejected: %w", err)
+	}
+
 	return s.repo.UpdateStatus(ctx, fileID, "READY")
 }
 
@@ -152,9 +183,26 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 		return nil, err
 	}
 
+	// Read first 512 bytes of file
+	header := make([]byte, 512)
+	n, readErr := io.ReadFull(content, header)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		return nil, fmt.Errorf("failed to read file header for validation: %w", readErr)
+	}
+	headerBytes := header[:n]
+
+	// Validate magic bytes
+	detectedMime := http.DetectContentType(headerBytes)
+	if err := ValidateMagicBytes(detectedMime, contentType, filename); err != nil {
+		return nil, err
+	}
+
+	// reconstruct stream using MuliReder to ensure all bytes are uploaded
+	fullContent := io.MultiReader(bytes.NewReader(headerBytes), content)
+
 	storageKey := s.generateStorageKey(userID, filename)
 
-	_, err := s.storage.Upload(ctx, storageKey, content, size, contentType)
+	_, err := s.storage.Upload(ctx, storageKey, fullContent, size, contentType)
 	if err != nil {
 		return nil, fmt.Errorf("failed upload in storage: %w", err)
 	}
@@ -303,4 +351,70 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 		return nil, fmt.Errorf("unauthorized")
 	}
 	return file, nil
+}
+
+
+// ValidateMagicBytes verifies that the adcual bytes of the files matched the alloed types
+func ValidateMagicBytes(detectedType, declaredType, fileName string) error {
+	detectedType = strings.ToLower(strings.Split(detectedType, ";")[0])
+	declaredType = strings.ToLower(strings.Split(declaredType, ";")[0])
+	ext := strings.ToLower(filepath.Ext(fileName))
+
+	isOfficeDoc := (declaredType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+		declaredType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+		declaredType == "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+	
+	actualAllowedType := detectedType
+	if detectedType == "application/zip" && isOfficeDoc {
+		actualAllowedType = declaredType
+	}
+
+	if !AllowedMimeTypes[actualAllowedType] {
+		return fmt.Errorf("detected MIME type %s is not permitted in ByteVault", detectedType)
+	}
+
+	if !areTypesCompatible(detectedType, declaredType, ext) {
+		return fmt.Errorf("extention spoofing detected: declared content type %s does not align with actual content tyoe %s", declaredType, detectedType)
+	}
+
+	return nil
+}
+
+func areTypesCompatible(detected, declared, ext string) bool {
+	if detected == declared {
+		return true
+	}
+
+	if detected == "application/zip" {
+		if declared == "application/zip" {
+			return true
+		}
+		if ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || ext == ".doc" || ext == ".xls" || ext == ".ppt" {
+			return true
+		}
+	}
+
+	if strings.HasPrefix(detected, "text/") && strings.HasPrefix(declared, "text/") {
+		return true
+	}
+	if detected == "text/plain" && (declared == "text/markdown" || declared == "text/csv") {
+		return true
+	}
+
+	if detected == "application/octet-stream" {
+		blockedExts:= map[string]bool{
+			".exe": true,
+			".bat": true, 
+			".sh": true, 
+			".dll": true,
+			".com": true, 
+			".cmd": true, 
+			".msi": true, 
+			".scr": true,
+		}
+
+		return !blockedExts[ext]
+	}
+
+	return false
 }

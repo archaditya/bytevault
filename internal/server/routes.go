@@ -64,6 +64,7 @@ func (s *Server) registerRoutes() {
 	verifyRepo := repository.NewEmailVerificationRepository(s.db)
 	notifRepo := repository.NewNotificationRepository(s.db)
 	pushTokenRepo := repository.NewPushTokenRepository(s.db)
+	contactRepo := repository.NewContactRepository(s.db)
 
 	// 4. Initialize Services
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
@@ -71,18 +72,21 @@ func (s *Server) registerRoutes() {
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, notifService, s.config.JWT)
 	fileService := service.NewFileService(fileRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket)
 	folderService := service.NewFolderService(folderRepo, fileRepo)
+	contactService := service.NewContactService(contactRepo, emailClient)
 
 	// 5. Initialize Handlers
 	fileHandler := handler.NewFileHandler(fileService, s.config.Storage.LocalDir)
 	folderHandler := handler.NewFolderHandler(folderService)
 	notifHandler := handler.NewNotificationHandler(authService, notifService)
+	contactHandler := handler.NewContactHandler(contactService)
 
 	// 6. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")
 
-		// Public routes
+	// Public routes
 	s.registerHealthRoutes(v1)
 	s.registerAuthRoutes(v1, authService, notifHandler, userRepo)
+	v1.POST("/contact", contactHandler.Submit)
 
 	// Public user avatar endpoint proxy
 	v1.GET("/users/:id/avatar", func(c echo.Context) error {
@@ -97,7 +101,7 @@ func (s *Server) registerRoutes() {
 			return c.Redirect(http.StatusFound, *user.AvatarURL)
 		}
 
-		// Otherwise download the file from R2/Local storage securely
+		// Otherwise download the file securely
 		stream, err := store.Download(c.Request().Context(), *user.AvatarURL)
 		if err != nil {
 			return c.Redirect(http.StatusFound, "https://www.gravatar.com/avatar/?d=mp")
@@ -132,6 +136,10 @@ func (s *Server) registerRoutes() {
 	// Admin routes (JWT + admin permissions required)
 	s.registerAdminRoutes(protected, userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 
+	// Admin contact queries routes
+	adminGroup := protected.Group("/admin")
+	adminGroup.GET("/contact-queries", contactHandler.List, appMiddleware.RequirePermission("admin:users"))
+	adminGroup.POST("/contact-queries/:id/reply", contactHandler.Reply, appMiddleware.RequirePermission("admin:users"))
 
 	// File endpoints
 	s.registerFileRoutes(v1, fileHandler, authMiddleware)
