@@ -70,9 +70,13 @@ func (l *LocalStorage) GeneratePresignedUploadURL(ctx context.Context, storageKe
 	return fmt.Sprintf("/api/v1/files/upload/direct?key=%s", storageKey), nil
 }
 
-func (l *LocalStorage) GeneratePresignedDownloadURL(ctx context.Context, storageKey string, expiry time.Duration) (string, error) {
+func (l *LocalStorage) GeneratePresignedDownloadURL(ctx context.Context, storageKey string, expiry time.Duration, filename string, inline bool) (string, error) {
 	// Dev environment shortcut: direct file access route
-	return fmt.Sprintf("/api/v1/files/download/direct?key=%s", storageKey), nil
+	url := fmt.Sprintf("/api/v1/files/download/direct?key=%s", storageKey)
+	if inline {
+		url += "&inline=true"
+	}
+	return url, nil
 }
 
 func (l *LocalStorage) List(ctx context.Context, prefix string) ([]string, error) {

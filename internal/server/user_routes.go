@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 )
 
 func (s *Server) registerUserRoutes(
+	v1 *Group,
 	protected *Group,
 	userRepo *repository.UserRepository,
 	deviceRepo *repository.DeviceRepository,
@@ -22,6 +24,44 @@ func (s *Server) registerUserRoutes(
 	fileRepo *repository.FileRepository,
 	store storage.StorageProvider,
 ) {
+	// Public user avatar endpoint proxy
+	v1.GET("/users/:id/avatar", func(c echo.Context) error {
+		userID := c.Param("id")
+		user, err := userRepo.FindByID(c.Request().Context(), userID)
+		if err != nil || user.AvatarURL == nil || *user.AvatarURL == "" {
+			return c.Redirect(http.StatusFound, "https://www.gravatar.com/avatar/?d=mp")
+		}
+
+		// If it's a Google OAuth avatar or another external URL, redirect directly
+		if strings.HasPrefix(*user.AvatarURL, "http") {
+			return c.Redirect(http.StatusFound, *user.AvatarURL)
+		}
+
+		// Otherwise download the file securely
+		stream, err := store.Download(c.Request().Context(), *user.AvatarURL)
+		if err != nil {
+			return c.Redirect(http.StatusFound, "https://www.gravatar.com/avatar/?d=mp")
+		}
+		defer stream.Close()
+
+		// Detect standard image content types
+		contentType := "image/jpeg"
+		lowerURL := strings.ToLower(*user.AvatarURL)
+		if strings.HasSuffix(lowerURL, ".png") {
+			contentType = "image/png"
+		} else if strings.HasSuffix(lowerURL, ".webp") {
+			contentType = "image/webp"
+		} else if strings.HasSuffix(lowerURL, ".gif") {
+			contentType = "image/gif"
+		}
+
+		c.Response().Header().Set(echo.HeaderContentType, contentType)
+		c.Response().Header().Set(echo.HeaderCacheControl, "public, max-age=86400") // Cache locally for 1 day
+		c.Response().WriteHeader(http.StatusOK)
+		_, err = io.Copy(c.Response().Writer, stream)
+		return err
+	})
+
 	// GET /api/v1/me
 	protected.GET("/me", func(c echo.Context) error {
 		userID := c.Get("user_id").(string)

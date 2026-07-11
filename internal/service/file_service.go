@@ -232,41 +232,42 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 	return fileMeta, nil
 }
 
-func (s *FileService) Download(ctx context.Context, fileID, userID string) (io.ReadCloser, *model.File, error) {
+func (s *FileService) Download(ctx context.Context, fileID, userID string, inline bool) (string, *model.File, error) {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
 	}
 	if file == nil {
-		return nil, nil, fmt.Errorf("file not found")
+		return "", nil, fmt.Errorf("file not found")
 	}
 	if file.UserID != userID {
-		return nil, nil, fmt.Errorf("unauthorized")
+		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	stream, err := s.storage.Download(ctx, file.StorageKey)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
+
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to download from storage: %w", err)
+		return  "", nil, fmt.Errorf("failed to generate download URL: %w", err)
 	}
 
-	return stream, file, nil
+	return url, file, nil
 }
 
-func (s *FileService) DownloadPublic(ctx context.Context, fileID string) (io.ReadCloser, *model.File, error) {
+func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline bool) (string, *model.File, error) {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
 	}
 	if file == nil {
-		return nil, nil, fmt.Errorf("file not found")
+		return "", nil, fmt.Errorf("file not found")
 	}
 	if !file.IsPublic {
-		return nil, nil, fmt.Errorf("unauthorized")
+		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	stream, err := s.storage.Download(ctx, file.StorageKey)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to download from storage: %w", err)
+		return "", nil, fmt.Errorf("failed to download from storage: %w", err)
 	}
 
 	// Increment downloads count asynchronously ONLY for public shared downloads
@@ -274,7 +275,7 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string) (io.Rea
 		_ = s.repo.IncrementDownloads(context.Background(), file.ID)
 	}()
 
-	return stream, file, nil
+	return url, file, nil
 }
 
 func (s *FileService) ListUserFiles(ctx context.Context, params repository.ListFilesParams) ([]*model.File, string, error) {

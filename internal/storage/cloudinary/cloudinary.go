@@ -105,7 +105,7 @@ func (c *CloudinaryStorage) GeneratePresignedUploadURL(ctx context.Context, stor
 		c.cld.Config.Cloud.CloudName, signature, c.cld.Config.Cloud.APIKey, timestamp, publicID), nil
 }
 
-func (c *CloudinaryStorage) GeneratePresignedDownloadURL(ctx context.Context, storageKey string, expiry time.Duration) (string, error) {
+func (c *CloudinaryStorage) GeneratePresignedDownloadURL(ctx context.Context, storageKey string, expiry time.Duration, filename string, inline bool) (string, error) {
 	url, err := c.cld.Image(cleanPublicID(storageKey))
 	if err != nil {
 		return "", err

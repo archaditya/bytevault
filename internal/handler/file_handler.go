@@ -168,23 +168,14 @@ func (h *FileHandler) Download(c echo.Context) error {
 	fileID := c.Param("id")
 	userID := c.Get("user_id").(string)
 
-	stream, fileMeta, err := h.service.Download(c.Request().Context(), fileID, userID)
+	inline := c.QueryParam("inline") == "true"
+
+	url, _, err := h.service.Download(c.Request().Context(), fileID, userID, inline)
 	if err != nil {
 		return SendError(c, http.StatusForbidden, err.Error())
 	}
-	defer stream.Close()
 
-	disposition := "attachment"
-	if c.QueryParam("inline") == "true" {
-		disposition = "inline"
-	}
-
-	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
-	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
-	c.Response().WriteHeader(http.StatusOK)
-
-	_, err = io.Copy(c.Response().Writer, stream)
-	return err
+	return c.Redirect(http.StatusFound, url)
 }
 
 // GET /api/v1/files/public/:id/metadata
@@ -207,28 +198,14 @@ func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
 func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	fileID := c.Param("id")
 
-	stream, fileMeta, err := h.service.DownloadPublic(c.Request().Context(), fileID)
+	inline := c.QueryParam("inline") == "true"
+
+	url, _, err := h.service.DownloadPublic(c.Request().Context(), fileID, inline)
 	if err != nil {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
-	defer stream.Close()
 
-	disposition := "attachment"
-	if c.QueryParam("inline") == "true" {
-		disposition = "inline"
-	}
-
-	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
-	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
-	c.Response().WriteHeader(http.StatusOK)
-
-	// If HEAD request, do not stream the actual file body
-	if c.Request().Method == http.MethodHead {
-		return nil
-	}
-
-	_, err = io.Copy(c.Response().Writer, stream)
-	return err
+	return c.Redirect(http.StatusFound, url)
 }
 
 func (h *FileHandler) List(c echo.Context) error {

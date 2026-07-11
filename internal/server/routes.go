@@ -1,10 +1,6 @@
 package server
 
 import (
-	"io"
-	"net/http"
-	"strings"
-
 	"github.com/archaditya/bytevault/internal/handler"
 	"github.com/archaditya/bytevault/internal/logger"
 	appMiddleware "github.com/archaditya/bytevault/internal/middleware"
@@ -79,6 +75,7 @@ func (s *Server) registerRoutes() {
 	folderHandler := handler.NewFolderHandler(folderService)
 	notifHandler := handler.NewNotificationHandler(authService, notifService)
 	contactHandler := handler.NewContactHandler(contactService)
+	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 
 	// 6. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")
@@ -86,62 +83,17 @@ func (s *Server) registerRoutes() {
 	// Public routes
 	s.registerHealthRoutes(v1)
 	s.registerAuthRoutes(v1, authService, notifHandler, userRepo)
-	v1.POST("/contact", contactHandler.Submit)
-
-	// Public user avatar endpoint proxy
-	v1.GET("/users/:id/avatar", func(c echo.Context) error {
-		userID := c.Param("id")
-		user, err := userRepo.FindByID(c.Request().Context(), userID)
-		if err != nil || user.AvatarURL == nil || *user.AvatarURL == "" {
-			return c.Redirect(http.StatusFound, "https://www.gravatar.com/avatar/?d=mp")
-		}
-
-		// If it's a Google OAuth avatar or another external URL, redirect directly
-		if strings.HasPrefix(*user.AvatarURL, "http") {
-			return c.Redirect(http.StatusFound, *user.AvatarURL)
-		}
-
-		// Otherwise download the file securely
-		stream, err := store.Download(c.Request().Context(), *user.AvatarURL)
-		if err != nil {
-			return c.Redirect(http.StatusFound, "https://www.gravatar.com/avatar/?d=mp")
-		}
-		defer stream.Close()
-
-		// Detect standard image content types
-		contentType := "image/jpeg"
-		lowerURL := strings.ToLower(*user.AvatarURL)
-		if strings.HasSuffix(lowerURL, ".png") {
-			contentType = "image/png"
-		} else if strings.HasSuffix(lowerURL, ".webp") {
-			contentType = "image/webp"
-		} else if strings.HasSuffix(lowerURL, ".gif") {
-			contentType = "image/gif"
-		}
-
-		c.Response().Header().Set(echo.HeaderContentType, contentType)
-		c.Response().Header().Set(echo.HeaderCacheControl, "public, max-age=86400") // Cache locally for 1 day
-		c.Response().WriteHeader(http.StatusOK)
-		_, err = io.Copy(c.Response().Writer, stream)
-		return err
-	})
 
 	// Protected routes (JWT required)
 	authMiddleware := appMiddleware.Auth(authService)
 	protected := v1.Group("", authMiddleware)
-	s.registerUserRoutes(protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
+
+	// Delegate Route Groupings
+	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
 	s.registerFolderRoutes(protected, folderHandler)
 	s.registerNotificationRoutes(protected, notifHandler)
-
-	// Admin routes (JWT + admin permissions required)
-	s.registerAdminRoutes(protected, userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
-
-	// Admin contact queries routes
-	adminGroup := protected.Group("/admin")
-	adminGroup.GET("/contact-queries", contactHandler.List, appMiddleware.RequirePermission("admin:users"))
-	adminGroup.POST("/contact-queries/:id/reply", contactHandler.Reply, appMiddleware.RequirePermission("admin:users"))
-
-	// File endpoints
+	s.registerAdminRoutes(protected, adminHandler)
+	s.registerContactRoutes(v1, protected, contactHandler)
 	s.registerFileRoutes(v1, fileHandler, authMiddleware)
 
 	// 7. Start Background Workers and Scheduler
