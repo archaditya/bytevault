@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/archaditya/bytevault/internal/model"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type R2Storage struct {
@@ -133,4 +135,65 @@ func (r *R2Storage) List(ctx context.Context, prefix string) ([]string, error) {
 		}
 	}
 	return keys, nil
+}
+
+// Multipart Upload Flow //
+func (r *R2Storage) InitiateMultipartUpload(ctx context.Context, storageKey string, contentType string) (string, error) {
+	resp, err := r.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket:      aws.String(r.bucket),
+		Key:         aws.String(storageKey),
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to initiate multipart upload: %w", err)
+	}
+	return aws.ToString(resp.UploadId), nil
+}
+
+func (r *R2Storage) GeneratePresignedUploadPartURL(ctx context.Context, storageKey string, uploadID string, partNumber int32, expiry time.Duration) (string, error) {
+	req, err := r.presignClient.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(r.bucket),
+		Key:        aws.String(storageKey),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(partNumber),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("failed to presign upload part URL: %w", err)
+	}
+	return req.URL, nil
+}
+
+func (r *R2Storage) CompleteMultipartUpload(ctx context.Context, storageKey string, uploadID string, parts []model.UploadPart) (string, error) {
+	var s3Parts []s3types.CompletedPart
+	for _, p := range parts {
+		s3Parts = append(s3Parts, s3types.CompletedPart{
+			PartNumber: aws.Int32(p.PartNumber),
+			ETag:       aws.String(p.ETag),
+		})
+	}
+
+	resp, err := r.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(r.bucket),
+		Key:      aws.String(storageKey),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &s3types.CompletedMultipartUpload{
+			Parts: s3Parts,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to complete multipart upload: %w", err)
+	}
+	return aws.ToString(resp.Location), nil
+}
+
+func (r *R2Storage) AbortMultipartUpload(ctx context.Context, storageKey string, uploadID string) error {
+	_, err := r.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(r.bucket),
+		Key:      aws.String(storageKey),
+		UploadId: aws.String(uploadID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to abort multipart upload: %w", err)
+	}
+	return nil
 }

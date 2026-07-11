@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/archaditya/bytevault/internal/model"
 )
 
 type LocalStorage struct {
@@ -104,4 +106,21 @@ func (l *LocalStorage) List(ctx context.Context, prefix string) ([]string, error
 		return nil, fmt.Errorf("failed to list local files: %w", err)
 	}
 	return keys, nil
+}
+
+// Multipar Functions Definitions
+func (l *LocalStorage) InitiateMultipartUpload(ctx context.Context, storageKey string, contentType string) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported for local storage")
+}
+
+func (l *LocalStorage) GeneratePresignedUploadPartURL(ctx context.Context, storageKey string, uploadID string, partNumber int32, expiry time.Duration) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported for local storage")
+}
+
+func (l *LocalStorage) CompleteMultipartUpload(ctx context.Context, storageKey string, uploadID string, parts []model.UploadPart) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported for local storage")
+}
+
+func (l *LocalStorage) AbortMultipartUpload(ctx context.Context, storageKey string, uploadID string) error {
+	return fmt.Errorf("multipart upload not supported for local storage")
 }

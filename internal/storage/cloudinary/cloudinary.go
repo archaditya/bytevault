@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/archaditya/bytevault/internal/model"
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/cloudinary/cloudinary-go/v2/api"
 	"github.com/cloudinary/cloudinary-go/v2/api/admin"
@@ -129,4 +130,21 @@ func (c *CloudinaryStorage) List(ctx context.Context, prefix string) ([]string, 
 		keys = append(keys, asset.PublicID)
 	}
 	return keys, nil
+}
+
+// Multipart functions definitions
+func (c *CloudinaryStorage) InitiateMultipartUpload(ctx context.Context, storageKey string, contentType string) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported for cloudinary")
+}
+
+func (c *CloudinaryStorage) GeneratePresignedUploadPartURL(ctx context.Context, storageKey string, uploadID string, partNumber int32, expiry time.Duration) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported for cloudinary")
+}
+
+func (c *CloudinaryStorage) CompleteMultipartUpload(ctx context.Context, storageKey string, uploadID string, parts []model.UploadPart) (string, error) {
+	return "", fmt.Errorf("multipart upload not supported for cloudinary")
+}
+
+func (c *CloudinaryStorage) AbortMultipartUpload(ctx context.Context, storageKey string, uploadID string) error {
+	return fmt.Errorf("multipart upload not supported for cloudinary")
 }
