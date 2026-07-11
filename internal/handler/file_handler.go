@@ -9,9 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/service"
+	"github.com/labstack/echo/v4"
 )
 
 type FileHandler struct {
@@ -168,23 +169,14 @@ func (h *FileHandler) Download(c echo.Context) error {
 	fileID := c.Param("id")
 	userID := c.Get("user_id").(string)
 
-	stream, fileMeta, err := h.service.Download(c.Request().Context(), fileID, userID)
+	inline := c.QueryParam("inline") == "true"
+
+	url, _, err := h.service.Download(c.Request().Context(), fileID, userID, inline)
 	if err != nil {
 		return SendError(c, http.StatusForbidden, err.Error())
 	}
-	defer stream.Close()
 
-	disposition := "attachment"
-	if c.QueryParam("inline") == "true" {
-		disposition = "inline"
-	}
-
-	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
-	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
-	c.Response().WriteHeader(http.StatusOK)
-
-	_, err = io.Copy(c.Response().Writer, stream)
-	return err
+	return c.Redirect(http.StatusFound, url)
 }
 
 // GET /api/v1/files/public/:id/metadata
@@ -207,28 +199,14 @@ func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
 func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	fileID := c.Param("id")
 
-	stream, fileMeta, err := h.service.DownloadPublic(c.Request().Context(), fileID)
+	inline := c.QueryParam("inline") == "true"
+
+	url, _, err := h.service.DownloadPublic(c.Request().Context(), fileID, inline)
 	if err != nil {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
-	defer stream.Close()
 
-	disposition := "attachment"
-	if c.QueryParam("inline") == "true" {
-		disposition = "inline"
-	}
-
-	c.Response().Header().Set(echo.HeaderContentDisposition, disposition+"; filename=\""+fileMeta.Filename+"\"")
-	c.Response().Header().Set(echo.HeaderContentType, fileMeta.ContentType)
-	c.Response().WriteHeader(http.StatusOK)
-
-	// If HEAD request, do not stream the actual file body
-	if c.Request().Method == http.MethodHead {
-		return nil
-	}
-
-	_, err = io.Copy(c.Response().Writer, stream)
-	return err
+	return c.Redirect(http.StatusFound, url)
 }
 
 func (h *FileHandler) List(c echo.Context) error {
@@ -348,5 +326,83 @@ func (h *FileHandler) GetDetails(c echo.Context) error {
 
 	return SendSuccess(c, http.StatusOK, map[string]interface{}{
 		"file": file,
+	}, nil)
+}
+
+
+// POST /api/v1/files/multipart-session
+func (h *FileHandler) CreateMultipartSession(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		Filename    string  `json:"filename"`
+		FileSize    int64   `json:"file_size"`
+		ContentType string  `json:"content_type"`
+		FolderID    *string `json:"folder_id,omitempty"`
+		PartCount   int     `json:"part_count"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" || req.PartCount <= 0 {
+		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
+	}
+
+	fileMeta, uploadID, partURLs, err := h.service.CreateMultipartUploadSession(
+		c.Request().Context(), userID, req.Filename, req.FileSize, req.ContentType, req.FolderID, req.PartCount,
+	)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"file_id":   fileMeta.ID,
+		"upload_id": uploadID,
+		"part_urls": partURLs,
+	}, nil)
+}
+
+// POST /api/v1/files/:id/complete-multipart
+func (h *FileHandler) CompleteMultipartSession(c echo.Context) error {
+	fileID := c.Param("id")
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		UploadID string             `json:"upload_id"`
+		Parts    []model.UploadPart `json:"parts"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.Parts) == 0 {
+		return SendError(c, http.StatusBadRequest, "Invalid completion parameters")
+	}
+
+	err := h.service.CompleteMultipartUpload(c.Request().Context(), fileID, userID, req.UploadID, req.Parts)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{
+		"message": "Multipart upload completed successfully",
+	}, nil)
+}
+
+// POST /api/v1/files/:id/abort-multipart
+func (h *FileHandler) AbortMultipartSession(c echo.Context) error {
+	fileID := c.Param("id")
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		UploadID string `json:"upload_id"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" {
+		return SendError(c, http.StatusBadRequest, "Invalid abort parameters")
+	}
+
+	err := h.service.AbortMultipartUpload(c.Request().Context(), fileID, userID, req.UploadID)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{
+		"message": "Multipart upload aborted successfully",
 	}, nil)
 }

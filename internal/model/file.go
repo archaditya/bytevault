@@ -25,3 +25,8 @@ type File struct {
 	OwnerName       string     `json:"owner_name,omitempty"`
 	OwnerEmail      string     `json:"owner_email,omitempty"`
 }
+
+type UploadPart struct {
+	PartNumber int32 `json:"part_number"`
+	ETag string `json:"etag"`
+}

@@ -232,41 +232,42 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 	return fileMeta, nil
 }
 
-func (s *FileService) Download(ctx context.Context, fileID, userID string) (io.ReadCloser, *model.File, error) {
+func (s *FileService) Download(ctx context.Context, fileID, userID string, inline bool) (string, *model.File, error) {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
 	}
 	if file == nil {
-		return nil, nil, fmt.Errorf("file not found")
+		return "", nil, fmt.Errorf("file not found")
 	}
 	if file.UserID != userID {
-		return nil, nil, fmt.Errorf("unauthorized")
+		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	stream, err := s.storage.Download(ctx, file.StorageKey)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
+
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to download from storage: %w", err)
+		return  "", nil, fmt.Errorf("failed to generate download URL: %w", err)
 	}
 
-	return stream, file, nil
+	return url, file, nil
 }
 
-func (s *FileService) DownloadPublic(ctx context.Context, fileID string) (io.ReadCloser, *model.File, error) {
+func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline bool) (string, *model.File, error) {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
 	}
 	if file == nil {
-		return nil, nil, fmt.Errorf("file not found")
+		return "", nil, fmt.Errorf("file not found")
 	}
 	if !file.IsPublic {
-		return nil, nil, fmt.Errorf("unauthorized")
+		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	stream, err := s.storage.Download(ctx, file.StorageKey)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to download from storage: %w", err)
+		return "", nil, fmt.Errorf("failed to download from storage: %w", err)
 	}
 
 	// Increment downloads count asynchronously ONLY for public shared downloads
@@ -274,7 +275,7 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string) (io.Rea
 		_ = s.repo.IncrementDownloads(context.Background(), file.ID)
 	}()
 
-	return stream, file, nil
+	return url, file, nil
 }
 
 func (s *FileService) ListUserFiles(ctx context.Context, params repository.ListFilesParams) ([]*model.File, string, error) {
@@ -417,4 +418,125 @@ func areTypesCompatible(detected, declared, ext string) bool {
 	}
 
 	return false
+}
+
+// Multipar Upload //
+func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, filename string, size int64, contentType string, folderID *string, partCount int) (*model.File, string, []map[string]interface{}, error) {
+	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
+		return  nil, "", nil, err
+	}
+
+	storageKey := s.generateStorageKey(userID, filename)
+
+	// Initialize Multipart upload
+	uploadID, err := s.storage.InitiateMultipartUpload(ctx, storageKey, contentType)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Generate Presigned URLs for each part
+	var partsURLs []map[string]interface{}
+	for i := 1; i <= partCount; i++ {
+		url, err := s.storage.GeneratePresignedUploadPartURL(ctx, storageKey, uploadID, int32(i), 30*time.Minute)
+		if err != nil {
+			//Abort session 
+			_ = s.storage.AbortMultipartUpload(ctx, storageKey, uploadID)
+			return nil, "", nil, fmt.Errorf("failed to presigned part %d: %w", i, err)
+		}
+		partsURLs = append(partsURLs, map[string]interface{}{
+			"part_number": i,
+			"url": url,
+		})
+	}
+
+	if folderID != nil && *folderID == "" {
+		folderID = nil
+	}
+
+	fileMeta := &model.File{
+		UserID:          userID,
+		Filename:        filename,
+		StorageProvider: s.storageProvider,
+		Bucket:          s.bucket,
+		StorageKey:      storageKey,
+		FileSize:        size,
+		ContentType:     contentType,
+		IsPublic:        false,
+		Status:          "UPLOADING",
+		FolderID:        folderID,
+	}
+
+	// create file record in db
+	if err := s.repo.Create(ctx, fileMeta); err != nil {
+		_ = s.storage.AbortMultipartUpload(ctx, storageKey, uploadID)
+		return nil, "", nil, err
+	}
+
+	return fileMeta, uploadID, partsURLs, nil
+}
+
+func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userID string, uploadID string, parts []model.UploadPart) error {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return fmt.Errorf("file not found")
+	}
+	if file.UserID != userID {
+		return fmt.Errorf("unauthoized")
+	}
+
+	// Assemble all parts and complete multipart upload
+	_, err = s.storage.CompleteMultipartUpload(ctx, file.StorageKey, uploadID, parts)
+	if err != nil {
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("failed to complete multipart upload assembly: %w", err)
+	}
+
+	// signature validation
+	stream, err := s.storage.Download(ctx, file.StorageKey)
+	if err != nil {
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("failed to download file from storage for validation: %w", err)
+	}
+
+	header := make([]byte, 512)
+	n, readErr := io.ReadFull(stream, header)
+	_ = stream.Close()
+
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
+		_ = s.storage.Delete(ctx, file.StorageKey)
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("failed to read file header from storage: %w", readErr)
+	}
+	headerBytes := header[:n]
+
+	// sniff actual content-type via magic bytes
+	detectedMime := http.DetectContentType(headerBytes)
+
+	// verify magic bytes / signature validation
+	if err := ValidateMagicBytes(detectedMime, file.ContentType, file.Filename); err != nil {
+		_ = s.storage.Delete(ctx, file.StorageKey)
+		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
+		return fmt.Errorf("upload rejected: %w", err)
+	}
+
+	return s.repo.UpdateStatus(ctx, fileID, "READY")
+}
+
+func (s *FileService) AbortMultipartUpload(ctx context.Context, fileID, userID string, uploadID string) error {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return fmt.Errorf("file not found")
+	}
+	if file.UserID != userID {
+		return fmt.Errorf("unauthorized")
+	}
+
+	_ = s.storage.AbortMultipartUpload(ctx, file.StorageKey, uploadID)
+	return s.repo.UpdateStatus(ctx, fileID, "FAILED")
 }

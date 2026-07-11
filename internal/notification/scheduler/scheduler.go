@@ -42,7 +42,14 @@ func NewScheduler(
 func (s *Scheduler) Start() {
 	s.ticker = time.NewTicker(6 * time.Hour)
 	go func() {
-		s.cleanup()
+		// Wait for 1 minute on startup before running cleanups to let the system stabilize
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(1 * time.Minute):
+			s.cleanup()
+		}
+
 		for {
 			select {
 			case <-s.ctx.Done():
@@ -138,6 +145,7 @@ func (s *Scheduler) cleanupOrphans(ctx context.Context) {
 			if len(orphans) > 0 {
 				logger.Log.Info().Int("count", len(orphans)).Msg("Purging orphan avatars from storage")
 				for _, key := range orphans {
+					logger.Log.Info().Str("key", key).Msg("Deleting orphan avatar from storage")
 					if delErr := s.store.Delete(ctx, key); delErr != nil {
 						logger.Log.Error().Err(delErr).Str("key", key).Msg("Failed to delete orphan avatar from storage")
 					}
@@ -164,6 +172,7 @@ func (s *Scheduler) cleanupOrphans(ctx context.Context) {
 			if len(orphans) > 0 {
 				logger.Log.Info().Int("count", len(orphans)).Msg("Purging orphan files from storage")
 				for _, key := range orphans {
+					logger.Log.Info().Str("key", key).Msg("Deleting orphan file from storage")
 					if delErr := s.store.Delete(ctx, key); delErr != nil {
 						logger.Log.Error().Err(delErr).Str("key", key).Msg("Failed to delete orphan file from storage")
 					}
