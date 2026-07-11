@@ -43,6 +43,9 @@ func (s *Server) registerRoutes() {
 		logger.Log.Fatal().Err(err).Msg("Failed to initialize storage provider")
 	}
 
+	// Wrap storage provider with the environment name prefix to isolate local and prod files
+ 	store = storage.NewPrefixedStorageProvider(s.config.App.Env, store)
+
 	// 2. Initialize Redis Queue (must happen before services that depend on it)
 	redisQueue, err := queue.NewRedisQueue(s.config.Redis)
 	if err != nil {
