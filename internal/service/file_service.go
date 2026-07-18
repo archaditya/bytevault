@@ -54,18 +54,20 @@ var AllowedMimeTypes = map[string]bool{
 
 type FileService struct {
 	repo            *repository.FileRepository
+	userRepo        *repository.UserRepository
 	storage         storage.StorageProvider
 	storageProvider string
 	bucket          *string
 }
 
-func NewFileService(repo *repository.FileRepository, storage storage.StorageProvider, provider string, bucket string) *FileService {
+func NewFileService(repo *repository.FileRepository, userRepo *repository.UserRepository, storage storage.StorageProvider, provider string, bucket string) *FileService {
 	var bPtr *string
 	if bucket != "" {
 		bPtr = &bucket
 	}
 	return &FileService{
 		repo:            repo,
+		userRepo:        userRepo,
 		storage:         storage,
 		storageProvider: provider,
 		bucket:          bPtr,
@@ -77,22 +79,38 @@ func (s *FileService) generateStorageKey(userID, filename string) string {
 }
 
 func (s *FileService) validateFile(ctx context.Context, userID string, size int64, contentType string) error {
-	// 1. Max File Size Validation
-	if size > MaxFileSizeLimit {
-		return fmt.Errorf("file size (%d bytes) exceeds the maximum allowed limit of 100MB", size)
+	// 1. Fetch user for dynamic limits
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch user details: %w", err)
 	}
 
-	// 2. MIME Type Validation
+	// 2. Per-user max file size validation
+	maxFileSize := int64(MaxFileSizeLimit)
+	if user.MaxFileSizeBytes != nil {
+		maxFileSize = *user.MaxFileSizeBytes
+	}
+	if size > maxFileSize {
+		return fmt.Errorf("file size (%d bytes) exceeds your maximum allowed file size limit of %d bytes", size, maxFileSize)
+	}
+
+	// 3. MIME Type Validation
 	if !AllowedMimeTypes[contentType] {
 		return fmt.Errorf("unsupported file type: %s", contentType)
 	}
 
-	// 3. User Storage Quota Check
+	// 4. User Storage Quota Check
 	used, err := s.repo.GetUserStorageUsed(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch user storage usage: %w", err)
 	}
-	if used+size > DefaultQuotaBytes {
+
+	totalLimit := int64(DefaultQuotaBytes)
+	if user.StorageLimitBytes != nil {
+		totalLimit = *user.StorageLimitBytes
+	}
+
+	if used+size > totalLimit {
 		return fmt.Errorf("insufficient storage. Uploading this file will exceed your remaining storage quota")
 	}
 
@@ -539,4 +557,36 @@ func (s *FileService) AbortMultipartUpload(ctx context.Context, fileID, userID s
 
 	_ = s.storage.AbortMultipartUpload(ctx, file.StorageKey, uploadID)
 	return s.repo.UpdateStatus(ctx, fileID, "FAILED")
+}
+
+// RefreshMultipartPartURLs generates fresh presigned URLs for pending parts of an existing multipart upload.
+// This is called when the client resumes after presigned URLs have expired.
+func (s *FileService) RefreshMultipartPartURLs(ctx context.Context, fileID, userID, uploadID string, partNumbers []int32) ([]map[string]interface{}, error) {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
+		return nil, fmt.Errorf("file not found")
+	}
+	if file.UserID != userID {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	if file.Status != "UPLOADING" {
+		return nil, fmt.Errorf("file is not in UPLOADING state")
+	}
+
+	var refreshedURLs []map[string]interface{}
+	for _, partNum := range partNumbers {
+		url, err := s.storage.GeneratePresignedUploadPartURL(ctx, file.StorageKey, uploadID, partNum, 30*time.Minute)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh presigned URL for part %d: %w", partNum, err)
+		}
+		refreshedURLs = append(refreshedURLs, map[string]interface{}{
+			"part_number": partNum,
+			"url":         url,
+		})
+	}
+
+	return refreshedURLs, nil
 }

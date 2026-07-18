@@ -32,13 +32,13 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 	}
 
 	query := `
-		INSERT INTO users (email, password, first_name, last_name, avatar_url, is_verified, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, email, password, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at, deleted_at
+		INSERT INTO users (email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
 	`
 
 	var created model.User
-	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName, user.AvatarURL, user.IsVerified, status).Scan(
+	err := r.db.QueryRow(ctx, query, user.Email, user.Password, user.FirstName, user.LastName, user.AvatarURL, user.IsVerified, status, user.StorageLimitBytes, user.MaxFileSizeBytes).Scan(
 		&created.ID,
 		&created.Email,
 		&created.Password,
@@ -47,6 +47,8 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 		&created.AvatarURL,
 		&created.IsVerified,
 		&created.Status,
+		&created.StorageLimitBytes,
+		&created.MaxFileSizeBytes,
 		&created.CreatedAt,
 		&created.UpdatedAt,
 		&created.DeletedAt,
@@ -60,7 +62,7 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
 	query := `
-		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at, deleted_at
+		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
 		FROM users
 		WHERE email = $1 AND deleted_at IS NULL
 	`
@@ -75,6 +77,8 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 		&user.AvatarURL,
 		&user.IsVerified,
 		&user.Status,
+		&user.StorageLimitBytes,
+		&user.MaxFileSizeBytes,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 		&user.DeletedAt,
@@ -91,7 +95,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
 	query := `
-		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, created_at, updated_at, deleted_at
+		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -106,6 +110,8 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*model.User, 
 		&user.AvatarURL,
 		&user.IsVerified,
 		&user.Status,
+		&user.StorageLimitBytes,
+		&user.MaxFileSizeBytes,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 		&user.DeletedAt,
@@ -180,7 +186,7 @@ func (r *UserRepository) ListAll(ctx context.Context, search string, status stri
 
 	// Data query
 	query := `
-		SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.is_verified, u.status, u.created_at, u.updated_at
+		SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.is_verified, u.status, u.storage_limit_bytes, u.max_file_size_bytes, u.created_at, u.updated_at
 		FROM users u
 		LEFT JOIN user_roles ur ON u.id = ur.user_id
 		LEFT JOIN roles r ON ur.role_id = r.id
@@ -202,7 +208,7 @@ func (r *UserRepository) ListAll(ctx context.Context, search string, status stri
 		var u model.User
 		if err := rows.Scan(
 			&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.AvatarURL,
-			&u.IsVerified, &u.Status, &u.CreatedAt, &u.UpdatedAt,
+			&u.IsVerified, &u.Status, &u.StorageLimitBytes, &u.MaxFileSizeBytes, &u.CreatedAt, &u.UpdatedAt,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan user: %w", err)
 		}
@@ -269,17 +275,19 @@ func (r *UserRepository) GetStats(ctx context.Context) (map[string]any, error) {
 	}, nil
 }
 
-func (r *UserRepository) UpdateDetails(ctx context.Context, id string, firstName *string, lastName *string, status *string, isVerified *bool) error {
+func (r *UserRepository) UpdateDetails(ctx context.Context, id string, firstName *string, lastName *string, status *string, isVerified *bool, storageLimitBytes *int64, maxFileSizeBytes *int64) error {
 	query := `
 		UPDATE users
 		SET first_name = COALESCE($2, first_name),
 		    last_name = COALESCE($3, last_name),
 		    status = COALESCE($4, status),
 		    is_verified = COALESCE($5, is_verified),
+		    storage_limit_bytes = COALESCE($6, storage_limit_bytes),
+		    max_file_size_bytes = COALESCE($7, max_file_size_bytes),
 		    updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
 	`
-	_, err := r.db.Exec(ctx, query, id, firstName, lastName, status, isVerified)
+	_, err := r.db.Exec(ctx, query, id, firstName, lastName, status, isVerified, storageLimitBytes, maxFileSizeBytes)
 	return err
 }
 

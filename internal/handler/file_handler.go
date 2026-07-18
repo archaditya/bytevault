@@ -406,3 +406,27 @@ func (h *FileHandler) AbortMultipartSession(c echo.Context) error {
 		"message": "Multipart upload aborted successfully",
 	}, nil)
 }
+
+// POST /api/v1/files/:id/refresh-part-urls
+func (h *FileHandler) RefreshPartURLs(c echo.Context) error {
+	fileID := c.Param("id")
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		UploadID    string  `json:"upload_id"`
+		PartNumbers []int32 `json:"part_numbers"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.PartNumbers) == 0 {
+		return SendError(c, http.StatusBadRequest, "Invalid request: upload_id and part_numbers are required")
+	}
+
+	refreshedURLs, err := h.service.RefreshMultipartPartURLs(c.Request().Context(), fileID, userID, req.UploadID, req.PartNumbers)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"part_urls": refreshedURLs,
+	}, nil)
+}

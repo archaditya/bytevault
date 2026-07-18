@@ -69,7 +69,7 @@ func (s *Server) registerRoutes() {
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
 	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, pushTokenRepo, userRepo)
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, notifService, s.config.JWT)
-	fileService := service.NewFileService(fileRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket)
+	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket)
 	folderService := service.NewFolderService(folderRepo, fileRepo)
 	contactService := service.NewContactService(contactRepo, emailClient)
 

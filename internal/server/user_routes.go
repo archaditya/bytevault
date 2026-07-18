@@ -90,7 +90,7 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusBadRequest, "Invalid request body")
 		}
 
-		if err := userRepo.UpdateDetails(c.Request().Context(), userID, req.FirstName, req.LastName, nil, nil); err != nil {
+		if err := userRepo.UpdateDetails(c.Request().Context(), userID, req.FirstName, req.LastName, nil, nil, nil, nil); err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to update profile")
 		}
 
@@ -208,21 +208,38 @@ func (s *Server) registerUserRoutes(
 	// GET /api/v1/me/quota
 	protected.GET("/me/quota", func(c echo.Context) error {
 		userID := c.Get("user_id").(string)
+		user, err := userRepo.FindByID(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to fetch user profile")
+		}
+
 		used, err := fileRepo.GetUserStorageUsed(c.Request().Context(), userID)
 		if err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to fetch storage usage")
 		}
 
-		remaining := int64(service.DefaultQuotaBytes) - used
+		totalLimit := int64(service.DefaultQuotaBytes)
+		if user.StorageLimitBytes != nil {
+			totalLimit = *user.StorageLimitBytes
+		}
+
+		maxFileSize := int64(service.MaxFileSizeLimit)
+		if user.MaxFileSizeBytes != nil {
+			maxFileSize = *user.MaxFileSizeBytes
+		}
+
+		remaining := totalLimit - used
 		if remaining < 0 {
 			remaining = 0
 		}
 
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{
-			"used_bytes":      used,
-			"total_bytes":     int64(service.DefaultQuotaBytes),
-			"remaining_bytes": remaining,
+			"used_bytes":           used,
+			"total_bytes":          totalLimit,
+			"remaining_bytes":      remaining,
+			"max_file_size_bytes":  maxFileSize,
 		}, nil)
+
 	})
 
 	// POST /api/v1/me/devices — register FCM token

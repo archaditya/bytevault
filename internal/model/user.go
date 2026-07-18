@@ -33,6 +33,9 @@ type User struct {
 	RoleName    string          `json:"role"`
 	Permissions map[string]bool `json:"permissions,omitempty"`
 
+	StorageLimitBytes *int64 `json:"storage_limit_bytes"` // User customized storage limit (bytes)
+	MaxFileSizeBytes  *int64 `json:"max_file_size_bytes"` // Per-user max single file upload size (bytes)
+
 	CreatedBy  *string   `json:"-"`
 	UpdatedBy  *string   `json:"-"`
 	DeletedBy  *string   `json:"-"`

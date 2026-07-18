@@ -24,6 +24,7 @@ func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, auth
 		filesGroup.POST("/multipart-session", fh.CreateMultipartSession)
 		filesGroup.POST("/:id/complete-multipart", fh.CompleteMultipartSession)
 		filesGroup.POST("/:id/abort-multipart", fh.AbortMultipartSession)
+		filesGroup.POST("/:id/refresh-part-urls", fh.RefreshPartURLs)
 		filesGroup.POST("/upload", fh.Upload) // Legacy route
 		filesGroup.GET("", fh.List)
 		filesGroup.GET("/:id/download", fh.Download)

@@ -392,7 +392,7 @@ func (s *AuthService) GoogleLogin(
 		}
 
 		if updated {
-			s.userRepo.UpdateDetails(ctx, user.ID, user.FirstName, user.LastName, nil, &user.IsVerified)
+			s.userRepo.UpdateDetails(ctx, user.ID, user.FirstName, user.LastName, nil, &user.IsVerified, nil, nil)
 			if user.AvatarURL != nil {
 				s.userRepo.UpdateAvatarURL(ctx, user.ID, *user.AvatarURL)
 			}
