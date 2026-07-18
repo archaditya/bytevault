@@ -84,6 +84,8 @@ func (h *AdminHandler) ListUsers(c echo.Context) error {
 			"avatar_url":  u.AvatarURL,
 			"is_verified": u.IsVerified,
 			"status":      u.Status,
+			"storage_limit_bytes": u.StorageLimitBytes,
+			"max_file_size_bytes": u.MaxFileSizeBytes,
 			"created_at":  u.CreatedAt,
 			"updated_at":  u.UpdatedAt,
 			"role":        roleName,
@@ -128,6 +130,8 @@ func (h *AdminHandler) GetUserDetail(c echo.Context) error {
 			"avatar_url":  u.AvatarURL,
 			"is_verified": u.IsVerified,
 			"status":      u.Status,
+			"storage_limit_bytes": u.StorageLimitBytes,
+			"max_file_size_bytes": u.MaxFileSizeBytes,
 			"created_at":  u.CreatedAt,
 			"updated_at":  u.UpdatedAt,
 			"role":        roleName,
@@ -144,18 +148,20 @@ func (h *AdminHandler) UpdateUser(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	var req struct {
-		FirstName  *string `json:"first_name"`
-		LastName   *string `json:"last_name"`
-		Status     *string `json:"status"`
-		IsVerified *bool   `json:"is_verified"`
-		RoleID     *string `json:"role_id"`
+		FirstName         *string `json:"first_name"`
+		LastName          *string `json:"last_name"`
+		Status            *string `json:"status"`
+		IsVerified        *bool   `json:"is_verified"`
+		RoleID            *string `json:"role_id"`
+		StorageLimitBytes *int64  `json:"storage_limit_bytes"`
+		MaxFileSizeBytes  *int64  `json:"max_file_size_bytes"`
 	}
 
 	if err := c.Bind(&req); err != nil {
 		return SendError(c, http.StatusBadRequest, "Invalid request body")
 	}
 
-	err := h.userRepo.UpdateDetails(ctx, id, req.FirstName, req.LastName, req.Status, req.IsVerified)
+	err := h.userRepo.UpdateDetails(ctx, id, req.FirstName, req.LastName, req.Status, req.IsVerified, req.StorageLimitBytes, req.MaxFileSizeBytes)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, "Failed to update user details")
 	}
