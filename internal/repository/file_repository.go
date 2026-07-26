@@ -58,7 +58,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -70,6 +70,7 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 		&file.StorageProvider,
 		&file.Bucket,
 		&file.StorageKey,
+		&file.ThumbnailKey,
 		&file.FileSize,
 		&file.ContentType,
 		&file.IsPublic,
@@ -132,7 +133,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ")
 
@@ -175,6 +176,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 			&f.StorageProvider,
 			&f.Bucket,
 			&f.StorageKey,
+			&f.ThumbnailKey,
 			&f.FileSize,
 			&f.ContentType,
 			&f.IsPublic,
@@ -401,5 +403,11 @@ func (r *FileRepository) GetAllStorageKeys(ctx context.Context) (map[string]bool
 func (r *FileRepository) IncrementDownloads(ctx context.Context, id string) error {
 	query := `UPDATE files SET downloads = downloads + 1, updated_at = NOW() WHERE id = $1`
 	_, err := r.db.Exec(ctx, query, id)
+	return err
+}
+
+func (r *FileRepository) UpdateThumbnailKey(ctx context.Context, id string, thumbnailKey string) error {
+	query := `UPDATE files SET thumbnail_key = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, thumbnailKey, id)
 	return err
 }
