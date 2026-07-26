@@ -64,11 +64,11 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 	query := `
 		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
 		FROM users
-		WHERE email = $1 AND deleted_at IS NULL
+		WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL
 	`
 
 	var user model.User
-	err := r.db.QueryRow(ctx, query, email).Scan(
+	err := r.db.QueryRow(ctx, query, strings.TrimSpace(email)).Scan(
 		&user.ID,
 		&user.Email,
 		&user.Password,

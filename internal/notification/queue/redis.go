@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,6 +18,7 @@ const (
 	JobTypeEmail    = "email"
 	JobTypePush     = "push"
 	JobTypeInApp    = "in_app"
+	JobTypeMediaProcess = "media_process"
 )
 
 // Priority levels.
@@ -38,6 +40,7 @@ const (
 	QueueEmail = "bytevault:queue:email"
 	QueuePush  = "bytevault:queue:push"
 	QueueInApp = "bytevault:queue:in_app"
+	QueueMediaProcessing = "bytevault:queue:media_processing"
 )
 
 // PubSub channel for real-time fan-out.
@@ -154,6 +157,53 @@ func (q *RedisQueue) DequeueWithPriority(ctx context.Context, queueName string, 
 	return q.Dequeue(ctx, queueName, timeout)
 }
 
+// EnqueueMediaJob pushes a thumbnail/media processing task to Redis queue
+func (q *RedisQueue) EnqueueMediaJob(ctx context.Context, fileID, userID, storageKey, contentType string) error {
+	job := &Job{
+		ID:        fmt.Sprintf("media-%s-%d", fileID, time.Now().UnixNano()),
+		Type:      JobTypeMediaProcess,
+		UserID:    userID,
+		Payload: map[string]any{
+			"file_id":      fileID,
+			"user_id":      userID,
+			"storage_key":  storageKey,
+			"content_type": contentType,
+		},
+		Priority:       PriorityNormal,
+		DeliveryStatus: DeliveryPending,
+		CreatedAt:      time.Now(),
+		MaxRetries:     3,
+	}
+
+	data, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("failed to marshal media job: %w", err)
+	}
+
+	return q.client.RPush(ctx, QueueMediaProcessing, data).Err()
+}
+
+// DequeueMediaJob fetches the next media task from Redis queue (blocking with timeout)
+func (q *RedisQueue) DequeueMediaJob(ctx context.Context, timeout time.Duration) (*Job, error) {
+	res, err := q.client.BLPop(ctx, timeout, QueueMediaProcessing).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, nil // Queue empty
+		}
+		return nil, err
+	}
+
+	if len(res) < 2 {
+		return nil, fmt.Errorf("invalid Redis BLPop payload")
+	}
+
+	var job Job
+	if err := json.Unmarshal([]byte(res[1]), &job); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal media job: %w", err)
+	}
+
+	return &job, nil
+}
 
 // Subscribe listens to the notification pub/sub channel.
 func (q *RedisQueue) Subscribe(ctx context.Context) *redis.PubSub {

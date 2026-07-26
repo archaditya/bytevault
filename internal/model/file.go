@@ -11,6 +11,8 @@ type File struct {
 	StorageProvider string     `json:"storage_provider"` // local, cloudinary, r2
 	Bucket          *string    `json:"bucket,omitempty"` // Nullable for providers without buckets
 	StorageKey      string     `json:"storage_key"`      // e.g., user/123/docs/resume.pdf
+	ThumbnailKey    *string    `json:"thumbnail_key,omitempty"`
+	ThumbnailURL    *string    `json:"thumbnail_url,omitempty"`
 	FileSize        int64      `json:"file_size"`
 	ContentType     string     `json:"content_type"`
 	IsPublic        bool       `json:"is_public"`

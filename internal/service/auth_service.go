@@ -42,12 +42,13 @@ type TokenPair struct {
 }
 
 type AuthService struct {
-	userRepo     *repository.UserRepository
-	sessionRepo  *repository.SessionRepository
-	roleRepo     *repository.RoleRepository
-	activityRepo *repository.ActivityRepository
-	notifService *NotificationService
-	jwtCfg       config.JWTConfig
+	userRepo         *repository.UserRepository
+	sessionRepo      *repository.SessionRepository
+	roleRepo         *repository.RoleRepository
+	activityRepo     *repository.ActivityRepository
+	authProviderRepo *repository.AuthProviderRepository
+	notifService     *NotificationService
+	jwtCfg           config.JWTConfig
 }
 
 func NewAuthService(
@@ -55,16 +56,18 @@ func NewAuthService(
 	sessionRepo *repository.SessionRepository,
 	roleRepo *repository.RoleRepository,
 	activityRepo *repository.ActivityRepository,
+	authProviderRepo *repository.AuthProviderRepository,
 	notifService *NotificationService,
 	jwtCfg config.JWTConfig,
 ) *AuthService {
 	return &AuthService{
-		userRepo:     userRepo,
-		sessionRepo:  sessionRepo,
-		roleRepo:     roleRepo,
-		activityRepo: activityRepo,
-		notifService: notifService,
-		jwtCfg:       jwtCfg,
+		userRepo:         userRepo,
+		sessionRepo:      sessionRepo,
+		roleRepo:         roleRepo,
+		activityRepo:     activityRepo,
+		authProviderRepo: authProviderRepo,
+		notifService:     notifService,
+		jwtCfg:           jwtCfg,
 	}
 }
 
@@ -257,7 +260,7 @@ func (s *AuthService) ValidateAccessToken(tokenString string) (*TokenClaims, err
 	}, nil
 }
 
-// GoogleLogin verifies a Google ID token and creates or retrieves the user.
+// GoogleLogin verifies a Google ID token and seamlessly links or creates the user.
 func (s *AuthService) GoogleLogin(
 	ctx context.Context,
 	idToken string,
@@ -267,7 +270,7 @@ func (s *AuthService) GoogleLogin(
 	userAgent *string,
 	ip *string,
 ) (*model.User, *TokenPair, error) {
-	// Verify token with Google's tokeninfo endpoint
+	// 1. Verify token with Google's tokeninfo endpoint
 	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + idToken)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to verify Google token: %w", err)
@@ -284,12 +287,15 @@ func (s *AuthService) GoogleLogin(
 		return nil, nil, fmt.Errorf("failed to parse Google token: %w", err)
 	}
 
-	email, _ := claims["email"].(string)
-	if email == "" {
-		return nil, nil, fmt.Errorf("Google token missing email claim")
+	rawEmail, _ := claims["email"].(string)
+	googleSub, _ := claims["sub"].(string)
+	if rawEmail == "" || googleSub == "" {
+		return nil, nil, fmt.Errorf("Google token missing email or sub claim")
 	}
 
-	// 1. Extract profile fields from ID Token claims
+	normalizedEmail := strings.ToLower(strings.TrimSpace(rawEmail))
+
+	// Extract profile fields from ID Token claims
 	var firstName, lastName, avatarURL string
 	if val, ok := claims["given_name"].(string); ok {
 		firstName = val
@@ -323,108 +329,93 @@ func (s *AuthService) GoogleLogin(
 		avatarURL = *reqAvatarURL
 	}
 
-	var isEmailVerified bool
-	if val, ok := claims["email_verified"]; ok {
-		switch v := val.(type) {
-		case bool:
-			isEmailVerified = v
-		case string:
-			isEmailVerified = (v == "true")
-		}
-	}
+	var user *model.User
 
-	// Check if user exists
-	user, err := s.userRepo.FindByEmail(ctx, email)
-	if err != nil {
-		if !errors.Is(err, repository.ErrUserNotFound) {
-			return nil, nil, err
-		}
-
-		// Create a temporary random password
-		tempPass := make([]byte, 16)
-		if _, randErr := rand.Read(tempPass); randErr != nil {
-			return nil, nil, fmt.Errorf("failed to generate secure temp password: %w", randErr)
-		}
-		tempPassword := hex.EncodeToString(tempPass)
-		hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), 14)
-		hashedPassword := string(hashedBytes)
-
-		// Create new user (Google account with a secure temporary password)
-		user = &model.User{
-			Email:      email,
-			Password:   &hashedPassword,
-			FirstName:  &firstName,
-			LastName:   &lastName,
-			AvatarURL:  &avatarURL,
-			IsVerified: isEmailVerified,
-		}
-
-		user, err = s.userRepo.Create(ctx, user)
+	// STEP A: Look for existing Google OAuth link in auth_providers table
+	existingLink, linkErr := s.authProviderRepo.FindByProviderAndID(ctx, "google", googleSub)
+	if linkErr == nil && existingLink != nil {
+		// OAuth link found — fetch linked user
+		user, err = s.userRepo.FindByID(ctx, existingLink.UserID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create Google user: %w", err)
-		}
-
-		// Assign default role
-		defaultRole, roleErr := s.roleRepo.FindByName(ctx, "user")
-		if roleErr == nil {
-			s.roleRepo.AssignRoleToUser(ctx, user.ID, defaultRole.ID, nil)
-			user.RoleName = defaultRole.Name
-			user.Permissions = defaultRole.Permissions
+			return nil, nil, fmt.Errorf("linked user account not found: %w", err)
 		}
 	} else {
-		// User exists. Sync/Update any empty/default names, avatar or verification status.
-		updated := false
-		if (user.FirstName == nil || *user.FirstName == "" || *user.FirstName == email) && firstName != "" {
-			user.FirstName = &firstName
-			updated = true
-		}
-		if (user.LastName == nil || *user.LastName == "") && lastName != "" {
-			user.LastName = &lastName
-			updated = true
-		}
-		if (user.AvatarURL == nil || *user.AvatarURL == "") && avatarURL != "" {
-			user.AvatarURL = &avatarURL
-			updated = true
-		}
-		if !user.IsVerified && isEmailVerified {
-			user.IsVerified = true
-			updated = true
-		}
-
-		if updated {
-			s.userRepo.UpdateDetails(ctx, user.ID, user.FirstName, user.LastName, nil, &user.IsVerified, nil, nil)
-			if user.AvatarURL != nil {
-				s.userRepo.UpdateAvatarURL(ctx, user.ID, *user.AvatarURL)
+		// STEP B: Look up user by normalized email (case-insensitive)
+		user, err = s.userRepo.FindByEmail(ctx, normalizedEmail)
+		if err != nil {
+			if !errors.Is(err, repository.ErrUserNotFound) {
+				return nil, nil, err
 			}
-		}
 
-		if user.Password == nil {
-			// Existing Google user with no password yet: generate and assign a temporary password
+			// STEP C: User doesn't exist — create new user account
 			tempPass := make([]byte, 16)
-			if _, randErr := rand.Read(tempPass); randErr == nil {
-				tempPassword := hex.EncodeToString(tempPass)
-				hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), 14)
-				hashedPassword := string(hashedBytes)
-				s.userRepo.UpdatePassword(ctx, user.ID, hashedPassword)
-				user.Password = &hashedPassword
-				user.HasPassword = true
+			if _, randErr := rand.Read(tempPass); randErr != nil {
+				return nil, nil, fmt.Errorf("failed to generate secure temp password: %w", randErr)
+			}
+			tempPassword := hex.EncodeToString(tempPass)
+			hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), 14)
+			hashedPassword := string(hashedBytes)
+
+			user = &model.User{
+				Email:      normalizedEmail,
+				Password:   &hashedPassword,
+				FirstName:  &firstName,
+				LastName:   &lastName,
+				AvatarURL:  &avatarURL,
+				IsVerified: true, // Google OAuth emails are verified
+			}
+
+			user, err = s.userRepo.Create(ctx, user)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to create Google user: %w", err)
+			}
+
+			defaultRole, roleErr := s.roleRepo.FindByName(ctx, "user")
+			if roleErr == nil {
+				s.roleRepo.AssignRoleToUser(ctx, user.ID, defaultRole.ID, nil)
+				user.RoleName = defaultRole.Name
+				user.Permissions = defaultRole.Permissions
+			}
+		} else {
+			// STEP D: Existing email/pass user found — Link Google OAuth to this user!
+			updated := false
+			if (user.FirstName == nil || *user.FirstName == "") && firstName != "" {
+				user.FirstName = &firstName
+				updated = true
+			}
+			if (user.LastName == nil || *user.LastName == "") && lastName != "" {
+				user.LastName = &lastName
+				updated = true
+			}
+			if (user.AvatarURL == nil || *user.AvatarURL == "") && avatarURL != "" {
+				user.AvatarURL = &avatarURL
+				updated = true
+			}
+			if !user.IsVerified {
+				user.IsVerified = true
+				updated = true
+			}
+
+			if updated {
+				s.userRepo.UpdateDetails(ctx, user.ID, user.FirstName, user.LastName, nil, &user.IsVerified, nil, nil)
 			}
 		}
+
+		// Save link in auth_providers table so future logins match instantly
+		_, _ = s.authProviderRepo.Create(ctx, &model.AuthProvider{
+			UserID:         user.ID,
+			Provider:       "google",
+			ProviderUserID: googleSub,
+			Email:          &normalizedEmail,
+		})
 	}
 
-	// Get role info for existing users
 	if user.RoleName == "" {
 		role, roleErr := s.roleRepo.GetUserRole(ctx, user.ID)
 		if roleErr == nil {
 			user.RoleName = role.Name
 			user.Permissions = role.Permissions
 		}
-	}
-
-	// Update avatar if changed
-	if avatarURL != "" && (user.AvatarURL == nil || *user.AvatarURL != avatarURL) {
-		s.userRepo.UpdateAvatarURL(ctx, user.ID, avatarURL)
-		user.AvatarURL = &avatarURL
 	}
 
 	// Log activity

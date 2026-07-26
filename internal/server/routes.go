@@ -68,8 +68,9 @@ func (s *Server) registerRoutes() {
 	// 4. Initialize Services
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
 	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, pushTokenRepo, userRepo)
-	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, notifService, s.config.JWT)
-	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket)
+	authProviderRepo := repository.NewAuthProviderRepository(s.db)
+	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT)
+	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue)
 	folderService := service.NewFolderService(folderRepo, fileRepo)
 	contactService := service.NewContactService(contactRepo, emailClient)
 
@@ -107,6 +108,10 @@ func (s *Server) registerRoutes() {
 		} else {
 			wp.Start()
 		}
+
+		// Start 2 concurrent Media Processing Workers (Images, Videos, PDFs)
+		mediaWorker := worker.NewMediaWorker(fileRepo, store, redisQueue)
+		mediaWorker.Start(2)
 	}
 
 	bgScheduler := scheduler.NewScheduler(verifyRepo, notifRepo, fileRepo, userRepo, store)

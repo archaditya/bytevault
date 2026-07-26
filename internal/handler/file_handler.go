@@ -430,3 +430,20 @@ func (h *FileHandler) RefreshPartURLs(c echo.Context) error {
 		"part_urls": refreshedURLs,
 	}, nil)
 }
+
+// GET /api/v1/files/:id/thumbnail
+func (h *FileHandler) GetThumbnail(c echo.Context) error {
+	fileID := c.Param("id")
+	userID := c.Get("user_id").(string)
+
+	url, _, err := h.service.GetThumbnail(c.Request().Context(), fileID, userID)
+	if err != nil {
+		// Fall back to original file download if thumbnail not ready or non-image
+		url, _, err = h.service.Download(c.Request().Context(), fileID, userID, true)
+		if err != nil {
+			return SendError(c, http.StatusNotFound, err.Error())
+		}
+	}
+
+	return c.Redirect(http.StatusFound, url)
+}

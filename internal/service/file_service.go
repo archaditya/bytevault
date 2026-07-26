@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
+	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/storage"
 )
@@ -22,15 +23,19 @@ const (
 	MaxFileSizeLimit = 100 * 1024 * 1024
 )
 
-// Whitelisted allowed MIME types for storage
+// Whitelisted allowed MIME types for storage (includes iOS HEIC/HEIF formats)
 var AllowedMimeTypes = map[string]bool{
-	"image/jpeg": true,
-	"image/png":  true,
-	"image/gif":  true,
-	"image/webp": true,
-	"image/svg+xml": true,
-	"application/pdf": true,
-	"application/msword": true,
+	"image/jpeg":          true,
+	"image/png":           true,
+	"image/gif":           true,
+	"image/webp":          true,
+	"image/svg+xml":       true,
+	"image/heic":          true,
+	"image/heif":          true,
+	"image/heic-sequence": true,
+	"image/heif-sequence": true,
+	"application/pdf":     true,
+	"application/msword":  true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
 	"application/vnd.ms-excel":                                                 true,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
@@ -58,9 +63,17 @@ type FileService struct {
 	storage         storage.StorageProvider
 	storageProvider string
 	bucket          *string
+	redisQueue      *queue.RedisQueue
 }
 
-func NewFileService(repo *repository.FileRepository, userRepo *repository.UserRepository, storage storage.StorageProvider, provider string, bucket string) *FileService {
+func NewFileService(
+	repo *repository.FileRepository,
+	userRepo *repository.UserRepository,
+	storage storage.StorageProvider,
+	provider string,
+	bucket string,
+	redisQueue *queue.RedisQueue,
+) *FileService {
 	var bPtr *string
 	if bucket != "" {
 		bPtr = &bucket
@@ -71,8 +84,20 @@ func NewFileService(repo *repository.FileRepository, userRepo *repository.UserRe
 		storage:         storage,
 		storageProvider: provider,
 		bucket:          bPtr,
+		redisQueue:      redisQueue,
 	}
 }
+
+// enqueueMediaProcessingJob safely triggers asynchronous background thumbnail generation
+func (s *FileService) enqueueMediaProcessingJob(ctx context.Context, file *model.File) {
+	if s.redisQueue == nil || file == nil {
+		return
+	}
+	go func() {
+		_ = s.redisQueue.EnqueueMediaJob(context.Background(), file.ID, file.UserID, file.StorageKey, file.ContentType)
+	}()
+}
+
 
 func (s *FileService) generateStorageKey(userID, filename string) string {
 	return fmt.Sprintf("user/%s/docs/%s", userID, filepath.Base(filename))
@@ -94,8 +119,11 @@ func (s *FileService) validateFile(ctx context.Context, userID string, size int6
 		return fmt.Errorf("file size (%d bytes) exceeds your maximum allowed file size limit of %d bytes", size, maxFileSize)
 	}
 
+	// Sanitize content type string
+	cleanContentType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+
 	// 3. MIME Type Validation
-	if !AllowedMimeTypes[contentType] {
+	if !AllowedMimeTypes[cleanContentType] && cleanContentType != "application/octet-stream" {
 		return fmt.Errorf("unsupported file type: %s", contentType)
 	}
 
@@ -165,7 +193,7 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string)
 		return fmt.Errorf("unauthorized")
 	}
 
-	// fetch first 512 bytes from storage for signature validation
+	// Fetch first 512 bytes from storage for signature validation
 	stream, err := s.storage.Download(ctx, file.StorageKey)
 	if err != nil {
 		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
@@ -183,17 +211,26 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string)
 	}
 	headerBytes := header[:n]
 
-	// sniff actual content-type via magic bytes
+	// Sniff actual content-type via magic bytes
 	detectedMime := http.DetectContentType(headerBytes)
 
-	// verify magic bytes /signature compatibility
+	// Check for HEIC magic bytes signature
+	if DetectHEICMagicBytes(headerBytes) {
+		detectedMime = "image/heic"
+	}
+
+	// Verify magic bytes / signature compatibility
 	if err := ValidateMagicBytes(detectedMime, file.ContentType, file.Filename); err != nil {
 		_ = s.storage.Delete(ctx, file.StorageKey)
 		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
 		return fmt.Errorf("upload rejected: %w", err)
 	}
 
-	return s.repo.UpdateStatus(ctx, fileID, "READY")
+	if err := s.repo.UpdateStatus(ctx, fileID, "READY"); err != nil {
+		return err
+	}
+	s.enqueueMediaProcessingJob(ctx, file)
+	return nil
 }
 
 func (s *FileService) Upload(ctx context.Context, userID, filename string, size int64, contentType string, content io.Reader, folderID *string) (*model.File, error) {
@@ -211,6 +248,10 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 
 	// Validate magic bytes
 	detectedMime := http.DetectContentType(headerBytes)
+	if DetectHEICMagicBytes(headerBytes) {
+		detectedMime = "image/heic"
+	}
+
 	if err := ValidateMagicBytes(detectedMime, contentType, filename); err != nil {
 		return nil, err
 	}
@@ -246,6 +287,8 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 		_ = s.storage.Delete(ctx, storageKey)
 		return nil, err
 	}
+
+	s.enqueueMediaProcessingJob(ctx, fileMeta)
 
 	return fileMeta, nil
 }
@@ -372,76 +415,11 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 	return file, nil
 }
 
+// --- Multipart Upload Methods ---
 
-// ValidateMagicBytes verifies that the adcual bytes of the files matched the alloed types
-func ValidateMagicBytes(detectedType, declaredType, fileName string) error {
-	detectedType = strings.ToLower(strings.Split(detectedType, ";")[0])
-	declaredType = strings.ToLower(strings.Split(declaredType, ";")[0])
-	ext := strings.ToLower(filepath.Ext(fileName))
-
-	isOfficeDoc := (declaredType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-		declaredType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-		declaredType == "application/vnd.openxmlformats-officedocument.presentationml.presentation")
-	
-	actualAllowedType := detectedType
-	if detectedType == "application/zip" && isOfficeDoc {
-		actualAllowedType = declaredType
-	}
-
-	if !AllowedMimeTypes[actualAllowedType] {
-		return fmt.Errorf("detected MIME type %s is not permitted in ByteVault", detectedType)
-	}
-
-	if !areTypesCompatible(detectedType, declaredType, ext) {
-		return fmt.Errorf("extention spoofing detected: declared content type %s does not align with actual content tyoe %s", declaredType, detectedType)
-	}
-
-	return nil
-}
-
-func areTypesCompatible(detected, declared, ext string) bool {
-	if detected == declared {
-		return true
-	}
-
-	if detected == "application/zip" {
-		if declared == "application/zip" {
-			return true
-		}
-		if ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || ext == ".doc" || ext == ".xls" || ext == ".ppt" {
-			return true
-		}
-	}
-
-	if strings.HasPrefix(detected, "text/") && strings.HasPrefix(declared, "text/") {
-		return true
-	}
-	if detected == "text/plain" && (declared == "text/markdown" || declared == "text/csv") {
-		return true
-	}
-
-	if detected == "application/octet-stream" {
-		blockedExts:= map[string]bool{
-			".exe": true,
-			".bat": true, 
-			".sh": true, 
-			".dll": true,
-			".com": true, 
-			".cmd": true, 
-			".msi": true, 
-			".scr": true,
-		}
-
-		return !blockedExts[ext]
-	}
-
-	return false
-}
-
-// Multipar Upload //
 func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, filename string, size int64, contentType string, folderID *string, partCount int) (*model.File, string, []map[string]interface{}, error) {
 	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
-		return  nil, "", nil, err
+		return nil, "", nil, err
 	}
 
 	storageKey := s.generateStorageKey(userID, filename)
@@ -459,11 +437,11 @@ func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, 
 		if err != nil {
 			//Abort session 
 			_ = s.storage.AbortMultipartUpload(ctx, storageKey, uploadID)
-			return nil, "", nil, fmt.Errorf("failed to presigned part %d: %w", i, err)
+			return nil, "", nil, fmt.Errorf("failed to generate presigned URL for part %d: %w", i, err)
 		}
 		partsURLs = append(partsURLs, map[string]interface{}{
 			"part_number": i,
-			"url": url,
+			"url":         url,
 		})
 	}
 
@@ -502,7 +480,7 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 		return fmt.Errorf("file not found")
 	}
 	if file.UserID != userID {
-		return fmt.Errorf("unauthoized")
+		return fmt.Errorf("unauthorized")
 	}
 
 	// Assemble all parts and complete multipart upload
@@ -532,6 +510,9 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 
 	// sniff actual content-type via magic bytes
 	detectedMime := http.DetectContentType(headerBytes)
+	if DetectHEICMagicBytes(headerBytes) {
+		detectedMime = "image/heic"
+	}
 
 	// verify magic bytes / signature validation
 	if err := ValidateMagicBytes(detectedMime, file.ContentType, file.Filename); err != nil {
@@ -540,7 +521,13 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 		return fmt.Errorf("upload rejected: %w", err)
 	}
 
-	return s.repo.UpdateStatus(ctx, fileID, "READY")
+	if err := s.repo.UpdateStatus(ctx, fileID, "READY"); err != nil {
+		return err
+	}
+
+	s.enqueueMediaProcessingJob(ctx, file)
+
+	return nil
 }
 
 func (s *FileService) AbortMultipartUpload(ctx context.Context, fileID, userID string, uploadID string) error {
@@ -589,4 +576,117 @@ func (s *FileService) RefreshMultipartPartURLs(ctx context.Context, fileID, user
 	}
 
 	return refreshedURLs, nil
+}
+
+// --- Validation Helpers ---
+
+func DetectHEICMagicBytes(header []byte) bool {
+	if len(header) < 12 {
+		return false
+	}
+	if string(header[4:8]) != "ftyp" {
+		return false
+	}
+	majorBrand := string(header[8:12])
+	switch majorBrand {
+	case "heic", "heix", "hevc", "hevx", "mif1", "msf1":
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidateMagicBytes(detectedType, declaredType, fileName string) error {
+	detectedType = strings.ToLower(strings.Split(detectedType, ";")[0])
+	declaredType = strings.ToLower(strings.Split(declaredType, ";")[0])
+	ext := strings.ToLower(filepath.Ext(fileName))
+
+	if ext == ".heic" || ext == ".heif" || declaredType == "image/heic" || declaredType == "image/heif" {
+		if detectedType == "application/octet-stream" || detectedType == "image/heic" || detectedType == "image/heif" {
+			return nil
+		}
+	}
+
+	isOfficeDoc := (declaredType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+		declaredType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+		declaredType == "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+
+	actualAllowedType := detectedType
+	if detectedType == "application/zip" && isOfficeDoc {
+		actualAllowedType = declaredType
+	}
+
+	if !AllowedMimeTypes[actualAllowedType] && detectedType != "application/octet-stream" {
+		return fmt.Errorf("detected MIME type %s is not permitted in ByteVault", detectedType)
+	}
+
+	if !areTypesCompatible(detectedType, declaredType, ext) {
+		return fmt.Errorf("extension spoofing detected: declared content type %s does not align with actual content type %s", declaredType, detectedType)
+	}
+
+	return nil
+}
+
+func areTypesCompatible(detected, declared, ext string) bool {
+	if detected == declared {
+		return true
+	}
+
+	if (ext == ".heic" || ext == ".heif") && (declared == "image/heic" || declared == "image/heif") {
+		return true
+	}
+
+	if detected == "application/zip" {
+		if declared == "application/zip" {
+			return true
+		}
+		if ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || ext == ".doc" || ext == ".xls" || ext == ".ppt" {
+			return true
+		}
+	}
+
+	if strings.HasPrefix(detected, "text/") && strings.HasPrefix(declared, "text/") {
+		return true
+	}
+	if detected == "text/plain" && (declared == "text/markdown" || declared == "text/csv") {
+		return true
+	}
+
+	if detected == "application/octet-stream" {
+		blockedExts := map[string]bool{
+			".exe": true,
+			".bat": true,
+			".sh":  true,
+			".dll": true,
+			".com": true,
+			".cmd": true,
+			".msi": true,
+			".scr": true,
+		}
+
+		return !blockedExts[ext]
+	}
+
+	return false
+}
+
+func (s *FileService) GetThumbnail(ctx context.Context, fileID, userID string) (string, *model.File, error) {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil || file == nil {
+		return "", nil, fmt.Errorf("file not found")
+	}
+	if file.UserID != userID {
+		return "", nil, fmt.Errorf("unauthorized")
+	}
+
+	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
+		return "", nil, fmt.Errorf("thumbnail not available")
+	}
+
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 5*time.Minute, file.Filename, true)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to generate thumbnail presigned URL: %w", err)
+	}
+
+	return url, file, nil
 }
