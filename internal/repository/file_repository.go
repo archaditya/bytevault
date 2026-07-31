@@ -411,3 +411,44 @@ func (r *FileRepository) UpdateThumbnailKey(ctx context.Context, id string, thum
 	_, err := r.db.Exec(ctx, query, thumbnailKey, id)
 	return err
 }
+
+func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID string) ([]*model.File, error) {
+	query := `
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		FROM files
+		WHERE folder_id = $1 AND status = 'READY' AND deleted_at IS NULL
+		ORDER BY filename ASC
+	`
+	rows, err := r.db.Query(ctx, query, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var f model.File
+		err := rows.Scan(
+			&f.ID,
+			&f.UserID,
+			&f.Filename,
+			&f.StorageProvider,
+			&f.Bucket,
+			&f.StorageKey,
+			&f.ThumbnailKey,
+			&f.FileSize,
+			&f.ContentType,
+			&f.IsPublic,
+			&f.Status,
+			&f.FolderID,
+			&f.CreatedAt,
+			&f.UpdatedAt,
+			&f.Downloads,
+		)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, &f)
+	}
+	return files, nil
+}

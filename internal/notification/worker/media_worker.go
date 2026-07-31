@@ -18,22 +18,25 @@ import (
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/security"
 	"github.com/archaditya/bytevault/internal/storage"
 )
 
 type MediaWorker struct {
-	fileRepo *repository.FileRepository
-	storage  storage.StorageProvider
-	queue    *queue.RedisQueue
-	stopChan chan struct{}
+	fileRepo       *repository.FileRepository
+	storage        storage.StorageProvider
+	queue          *queue.RedisQueue
+	malwareScanner security.MalwareScanner
+	stopChan       chan struct{}
 }
 
 func NewMediaWorker(fileRepo *repository.FileRepository, storage storage.StorageProvider, queue *queue.RedisQueue) *MediaWorker {
 	return &MediaWorker{
-		fileRepo: fileRepo,
-		storage:  storage,
-		queue:    queue,
-		stopChan: make(chan struct{}),
+		fileRepo:       fileRepo,
+		storage:        storage,
+		queue:          queue,
+		malwareScanner: security.NewDefaultMalwareScanner(),
+		stopChan:       make(chan struct{}),
 	}
 }
 
@@ -43,7 +46,7 @@ func (w *MediaWorker) Start(concurrency int) {
 		workerID := i + 1
 		go w.runWorker(workerID)
 	}
-	logger.Log.Info().Int("workers", concurrency).Msg("🚀 Media Processing Workers started")
+	logger.Log.Info().Int("workers", concurrency).Msg("🚀 Media & Security Workers started")
 }
 
 func (w *MediaWorker) Stop() {
@@ -68,19 +71,35 @@ func (w *MediaWorker) runWorker(id int) {
 			}
 
 			if err := w.ProcessFile(ctx, fileID); err != nil {
-				logger.Log.Error().Err(err).Int("worker_id", id).Str("file_id", fileID).Msg("Failed to process media thumbnail")
+				logger.Log.Error().Err(err).Int("worker_id", id).Str("file_id", fileID).Msg("Failed to process file security/thumbnail")
 			}
 		}
 	}
 }
 
-// ProcessFile determines the appropriate handler (Image, Video, PDF) based on Content-Type
+// ProcessFile executes 1. Malware Scan -> 2. Thumbnail Generation -> 3. Sets Status READY
 func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 	file, err := w.fileRepo.FindByID(ctx, fileID)
 	if err != nil || file == nil {
 		return fmt.Errorf("file not found: %s", fileID)
 	}
 
+	// 1. Malware & Virus Scanning Stage
+	if w.malwareScanner != nil {
+		scanStream, err := w.storage.Download(ctx, file.StorageKey)
+		if err == nil {
+			scanResult, scanErr := w.malwareScanner.ScanStream(ctx, scanStream)
+			_ = scanStream.Close()
+			if scanErr == nil && scanResult != nil && !scanResult.IsClean {
+				_ = w.storage.Delete(ctx, file.StorageKey)
+				_ = w.fileRepo.UpdateStatus(ctx, file.ID, "BLOCKED_MALWARE")
+				logger.Log.Warn().Str("file_id", file.ID).Str("threat", scanResult.Threat).Msg("🛡️ File blocked by background malware scan")
+				return fmt.Errorf("file infected: %s", scanResult.Threat)
+			}
+		}
+	}
+
+	// 2. Thumbnail Generation Stage
 	contentType := strings.ToLower(file.ContentType)
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 
@@ -93,29 +112,22 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 		thumbnailBytes, err = w.processVideo(ctx, file)
 	case contentType == "application/pdf" || ext == ".pdf":
 		thumbnailBytes, err = w.processPDF(ctx, file)
-	default:
-		return nil // Unsupported format for thumbnails, skip cleanly
 	}
 
-	if err != nil {
-		return err
+	if err == nil && len(thumbnailBytes) > 0 {
+		thumbnailKey := fmt.Sprintf("user/%s/thumbnails/%s.jpg", file.UserID, file.ID)
+		_, uploadErr := w.storage.Upload(ctx, thumbnailKey, bytes.NewReader(thumbnailBytes), int64(len(thumbnailBytes)), "image/jpeg")
+		if uploadErr == nil {
+			_ = w.fileRepo.UpdateThumbnailKey(ctx, file.ID, thumbnailKey)
+		}
 	}
 
-	if len(thumbnailBytes) == 0 {
-		return nil
+	// 3. Mark File Status = 'READY' (Unlocks Access Gate for Users)
+	if err := w.fileRepo.UpdateStatus(ctx, file.ID, "READY"); err != nil {
+		return fmt.Errorf("failed to update status to READY: %w", err)
 	}
 
-	thumbnailKey := fmt.Sprintf("user/%s/thumbnails/%s.jpg", file.UserID, file.ID)
-	_, err = w.storage.Upload(ctx, thumbnailKey, bytes.NewReader(thumbnailBytes), int64(len(thumbnailBytes)), "image/jpeg")
-	if err != nil {
-		return fmt.Errorf("failed to upload thumbnail to storage: %w", err)
-	}
-
-	if err := w.fileRepo.UpdateThumbnailKey(ctx, file.ID, thumbnailKey); err != nil {
-		return fmt.Errorf("failed to update thumbnail_key in DB: %w", err)
-	}
-
-	logger.Log.Info().Str("file_id", file.ID).Str("thumbnail_key", thumbnailKey).Msg("Media thumbnail generated & persisted")
+	logger.Log.Info().Str("file_id", file.ID).Msg("✅ File passed security scan & thumbnailing -> Marked READY")
 	return nil
 }
 

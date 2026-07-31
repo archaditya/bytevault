@@ -94,7 +94,7 @@ func (s *Server) registerRoutes() {
 
 	// Delegate Route Groupings
 	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
-	s.registerFolderRoutes(protected, folderHandler)
+	s.registerFolderRoutes(v1,protected, folderHandler)
 	s.registerNotificationRoutes(protected, notifHandler)
 	s.registerAdminRoutes(protected, adminHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
