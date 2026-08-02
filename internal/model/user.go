@@ -30,6 +30,9 @@ type User struct {
 	IsVerified bool      `json:"is_verified"`
 	Status     *string   `json:"status"`
 
+	MfaEnabled bool    `json:"mfa_enabled"`
+ 	MfaSecret  *string `json:"-"` // Never expose in JSON
+
 	RoleName    string          `json:"role"`
 	Permissions map[string]bool `json:"permissions,omitempty"`
 

@@ -13,6 +13,7 @@ import (
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/security"
 	"github.com/archaditya/bytevault/internal/storage"
 )
 
@@ -25,17 +26,17 @@ const (
 
 // Whitelisted allowed MIME types for storage (includes iOS HEIC/HEIF formats)
 var AllowedMimeTypes = map[string]bool{
-	"image/jpeg":          true,
-	"image/png":           true,
-	"image/gif":           true,
-	"image/webp":          true,
-	"image/svg+xml":       true,
-	"image/heic":          true,
-	"image/heif":          true,
-	"image/heic-sequence": true,
-	"image/heif-sequence": true,
-	"application/pdf":     true,
-	"application/msword":  true,
+	"image/jpeg":                                                                true,
+	"image/png":                                                                 true,
+	"image/gif":                                                                 true,
+	"image/webp":                                                                true,
+	"image/svg+xml":                                                             true,
+	"image/heic":                                                                true,
+	"image/heif":                                                                true,
+	"image/heic-sequence":                                                       true,
+	"image/heif-sequence":                                                       true,
+	"application/pdf":                                                           true,
+	"application/msword":                                                        true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
 	"application/vnd.ms-excel":                                                 true,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
@@ -64,6 +65,7 @@ type FileService struct {
 	storageProvider string
 	bucket          *string
 	redisQueue      *queue.RedisQueue
+	malwareScanner  security.MalwareScanner
 }
 
 func NewFileService(
@@ -85,6 +87,7 @@ func NewFileService(
 		storageProvider: provider,
 		bucket:          bPtr,
 		redisQueue:      redisQueue,
+		malwareScanner:  security.NewDefaultMalwareScanner(),
 	}
 }
 
@@ -226,7 +229,8 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string)
 		return fmt.Errorf("upload rejected: %w", err)
 	}
 
-	if err := s.repo.UpdateStatus(ctx, fileID, "READY"); err != nil {
+	// Set status to PENDING_SCAN and enqueue background worker for malware scan + thumbnailing
+	if err := s.repo.UpdateStatus(ctx, fileID, "PENDING_SCAN"); err != nil {
 		return err
 	}
 	s.enqueueMediaProcessingJob(ctx, file)
@@ -256,7 +260,7 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 		return nil, err
 	}
 
-	// reconstruct stream using MuliReder to ensure all bytes are uploaded
+	// reconstruct stream using MultiReader to ensure all bytes are uploaded
 	fullContent := io.MultiReader(bytes.NewReader(headerBytes), content)
 
 	storageKey := s.generateStorageKey(userID, filename)
@@ -279,7 +283,7 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 		FileSize:        size,
 		ContentType:     contentType,
 		IsPublic:        false,
-		Status:          "READY",
+		Status:          "PENDING_SCAN",
 		FolderID:        folderID,
 	}
 
@@ -305,10 +309,17 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
+	if file.Status == "PENDING_SCAN" {
+		return "", nil, fmt.Errorf("file is undergoing background security scan")
+	}
+	if file.Status == "BLOCKED_MALWARE" {
+		return "", nil, fmt.Errorf("file access blocked: security threat detected")
+	}
+
 	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
 
 	if err != nil {
-		return  "", nil, fmt.Errorf("failed to generate download URL: %w", err)
+		return "", nil, fmt.Errorf("failed to generate download URL: %w", err)
 	}
 
 	return url, file, nil
@@ -324,6 +335,13 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 	}
 	if !file.IsPublic {
 		return "", nil, fmt.Errorf("unauthorized")
+	}
+
+	if file.Status == "PENDING_SCAN" {
+		return "", nil, fmt.Errorf("file is undergoing background security scan")
+	}
+	if file.Status == "BLOCKED_MALWARE" {
+		return "", nil, fmt.Errorf("file access blocked: security threat detected")
 	}
 
 	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
@@ -521,7 +539,7 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 		return fmt.Errorf("upload rejected: %w", err)
 	}
 
-	if err := s.repo.UpdateStatus(ctx, fileID, "READY"); err != nil {
+	if err := s.repo.UpdateStatus(ctx, fileID, "PENDING_SCAN"); err != nil {
 		return err
 	}
 

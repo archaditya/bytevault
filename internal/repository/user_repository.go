@@ -404,3 +404,21 @@ func (r *UserRepository) GetAllAvatarURLs(ctx context.Context) (map[string]bool,
 	}
 	return urls, nil
 }
+
+// UpdateMFA sets the MFA secret and enabled flag for a user.
+func (r *UserRepository) UpdateMFA(ctx context.Context, userID string, mfaEnabled bool, mfaSecret *string) error {
+	query := `UPDATE users SET mfa_enabled = $2, mfa_secret = $3, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
+	_, err := r.db.Exec(ctx, query, userID, mfaEnabled, mfaSecret)
+	return err
+}
+
+// GetMFAFields returns mfa_enabled and mfa_secret for a user by ID.
+func (r *UserRepository) GetMFAFields(ctx context.Context, userID string) (bool, *string, error) {
+	var enabled bool
+	var secret *string
+	err := r.db.QueryRow(ctx, `SELECT mfa_enabled, mfa_secret FROM users WHERE id = $1 AND deleted_at IS NULL`, userID).Scan(&enabled, &secret)
+	if err != nil {
+		return false, nil, err
+	}
+	return enabled, secret, nil
+}

@@ -120,3 +120,43 @@ func (h *FolderHandler) Delete(c echo.Context) error {
 		"message": "Folder deleted successfully",
 	}, nil)
 }
+
+// PATCH /api/v1/folders/:id/share
+func (h *FolderHandler) ToggleShare(c echo.Context) error {
+	id := c.Param("id")
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		IsPublic bool `json:"is_public"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "Invalid request body")
+	}
+
+	err := h.service.ToggleShareStatus(c.Request().Context(), id, userID, req.IsPublic)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"message":   "Folder share status updated successfully",
+		"is_public": req.IsPublic,
+	}, nil)
+}
+
+// GET /api/v1/folders/public/:id
+func (h *FolderHandler) GetPublicFolder(c echo.Context) error {
+	id := c.Param("id")
+
+	folder, subfolders, files, err := h.service.GetPublicFolderContents(c.Request().Context(), id)
+	if err != nil {
+		return SendError(c, http.StatusNotFound, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"folder":     folder,
+		"subfolders": subfolders,
+		"files":      files,
+	}, nil)
+}

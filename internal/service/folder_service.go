@@ -42,6 +42,7 @@ func (s *FolderService) CreateFolder(ctx context.Context, userID, name string, p
 		UserID:   userID,
 		Name:     name,
 		ParentID: parentID,
+		IsPublic: false,
 	}
 
 	if err := s.repo.Create(ctx, folder); err != nil {
@@ -104,6 +105,37 @@ func (s *FolderService) RenameFolder(ctx context.Context, id, userID, name strin
 	}
 
 	return s.repo.Rename(ctx, id, name)
+}
+
+func (s *FolderService) ToggleShareStatus(ctx context.Context, id, userID string, isPublic bool) error {
+	folder, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if folder == nil || folder.UserID != userID {
+		return errors.New("folder not found or unauthorized")
+	}
+
+	return s.repo.UpdatePublicStatus(ctx, id, isPublic)
+}
+
+func (s *FolderService) GetPublicFolderContents(ctx context.Context, folderID string) (*model.Folder, []*model.Folder, []*model.File, error) {
+	folder, err := s.repo.FindByIDPublic(ctx, folderID)
+	if err != nil || folder == nil {
+		return nil, nil, nil, errors.New("public folder not found or not shared")
+	}
+
+	subfolders, err := s.repo.ListPublicSubfolders(ctx, folderID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	files, err := s.fileRepo.ListPublicFilesByFolderID(ctx, folderID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return folder, subfolders, files, nil
 }
 
 func (s *FolderService) DeleteFolder(ctx context.Context, id, userID string) error {
