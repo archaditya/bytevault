@@ -20,12 +20,14 @@ import (
 	"github.com/archaditya/bytevault/internal/logger"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/security"
 )
 
 var (
 	ErrEmailExists        = errors.New("email already registered")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidToken       = errors.New("invalid or expired token")
+	ErrMFARequired        = errors.New("mfa_required")
 )
 
 // TokenClaims holds the decoded JWT claims
@@ -160,6 +162,20 @@ func (s *AuthService) Login(ctx context.Context, email, password string, userAge
 		if err := s.notifService.GenerateAndSendOTP(ctx, user.ID, user.Email, *user.FirstName, "registration"); err != nil {
 			logger.Log.Error().Err(err).Msg("Failed to auto-send verification OTP on login")
 		}
+	}
+
+	// Check MFA: if enabled, return a short-lived MFA token instead of full session
+	mfaEnabled, _, mfaErr := s.userRepo.GetMFAFields(ctx, user.ID)
+	if mfaErr == nil && mfaEnabled {
+		mfaToken, err := s.generateMFAToken(user.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to generate MFA token: %w", err)
+		}
+		// Return user with mfa_token in the TokenPair (client checks mfa_required flag)
+		return user, &TokenPair{
+			AccessToken: mfaToken,
+			ExpiresAt:   time.Now().Add(5 * time.Minute).Unix(),
+		}, ErrMFARequired
 	}
 
 	// Log activity
@@ -434,6 +450,146 @@ func (s *AuthService) GoogleLogin(
 
 	return user, tokens, nil
 }
+
+// --- MFA Methods ---
+
+// SetupMFA generates a new TOTP secret and returns the otpauth:// URI for QR scanning
+func (s *AuthService) SetupMFA(ctx context.Context, userID string) (string, string, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return "", "", fmt.Errorf("user not found: %w", err)
+	}
+
+	secret, err := security.GenerateTOTPSecret()
+	if err != nil {
+		return "", "", err
+	}
+
+	// Store secret but don't enable MFA yet (user must verify first)
+	if err := s.userRepo.UpdateMFA(ctx, userID, false, &secret); err != nil {
+		return "", "", fmt.Errorf("failed to store MFA secret: %w", err)
+	}
+
+	qrURI := security.GenerateQRCodeURI(secret, user.Email)
+	return secret, qrURI, nil
+}
+
+// EnableMFA verifies the TOTP code and activates MFA for the user
+func (s *AuthService) EnableMFA(ctx context.Context, userID, code string) error {
+	_, mfaSecret, err := s.userRepo.GetMFAFields(ctx, userID)
+	if err != nil || mfaSecret == nil || *mfaSecret == "" {
+		return fmt.Errorf("MFA not set up. Call /auth/mfa/setup first")
+	}
+
+	if !security.VerifyTOTPCode(*mfaSecret, code) {
+		return fmt.Errorf("invalid TOTP code")
+	}
+
+	return s.userRepo.UpdateMFA(ctx, userID, true, mfaSecret)
+}
+
+// DisableMFA verifies the TOTP code and deactivates MFA for the user
+func (s *AuthService) DisableMFA(ctx context.Context, userID, code string) error {
+	mfaEnabled, mfaSecret, err := s.userRepo.GetMFAFields(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to read MFA status: %w", err)
+	}
+	if !mfaEnabled || mfaSecret == nil {
+		return fmt.Errorf("MFA is not enabled")
+	}
+
+	if !security.VerifyTOTPCode(*mfaSecret, code) {
+		return fmt.Errorf("invalid TOTP code")
+	}
+
+	return s.userRepo.UpdateMFA(ctx, userID, false, nil)
+}
+
+// VerifyMFALogin validates the short-lived MFA token + TOTP code, then issues a full JWT session
+func (s *AuthService) VerifyMFALogin(ctx context.Context, mfaToken, code string, userAgent, ip *string) (*model.User, *TokenPair, error) {
+	userID, err := s.validateMFAToken(mfaToken)
+	if err != nil {
+		return nil, nil, ErrInvalidToken
+	}
+
+	_, mfaSecret, mfaErr := s.userRepo.GetMFAFields(ctx, userID)
+	if mfaErr != nil || mfaSecret == nil {
+		return nil, nil, fmt.Errorf("MFA not configured")
+	}
+
+	if !security.VerifyTOTPCode(*mfaSecret, code) {
+		return nil, nil, fmt.Errorf("invalid TOTP code")
+	}
+
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	role, roleErr := s.roleRepo.GetUserRole(ctx, user.ID)
+	if roleErr == nil {
+		user.RoleName = role.Name
+		user.Permissions = role.Permissions
+	}
+
+	s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &user.ID,
+		Action:       "user.mfa_login",
+		ResourceType: strPtr("session"),
+		IPAddress:    ip,
+		UserAgent:    userAgent,
+	})
+
+	tokens, err := s.createSession(ctx, user.ID, user.RoleName, user.Permissions, userAgent, ip)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return user, tokens, nil
+}
+
+// generateMFAToken creates a short-lived JWT (5 min) for the MFA verification step
+func (s *AuthService) generateMFAToken(userID string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":     userID,
+		"purpose": "mfa_verify",
+		"exp":     time.Now().Add(5 * time.Minute).Unix(),
+		"iat":     time.Now().Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(s.jwtCfg.Secret))
+}
+
+// validateMFAToken parses and validates the short-lived MFA JWT
+func (s *AuthService) validateMFAToken(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(s.jwtCfg.Secret), nil
+	})
+	if err != nil {
+		return "", ErrInvalidToken
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return "", ErrInvalidToken
+	}
+
+	purpose, _ := claims["purpose"].(string)
+	if purpose != "mfa_verify" {
+		return "", ErrInvalidToken
+	}
+
+	userID, _ := claims["sub"].(string)
+	if userID == "" {
+		return "", ErrInvalidToken
+	}
+
+	return userID, nil
+}
+
 
 // --- Private helpers ---
 

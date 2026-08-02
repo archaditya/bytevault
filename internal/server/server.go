@@ -1,11 +1,13 @@
 package server
 
 import (
-	"golang.org/x/time/rate"
+	"strings"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 
 	"github.com/archaditya/bytevault/internal/config"
 	"github.com/archaditya/bytevault/internal/logger"
@@ -66,9 +68,24 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 
 	e.Use(middleware.Recover()) // Catches panics and return 500 error instead of crashing the server
 
+	// Hardened CORS: only allow known origins
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"http://localhost:8080",
+		"https://bytevault.archadi.dev",
+	}
+	if cfg.Server.AllowedOrigins != "" {
+		for _, o := range strings.Split(cfg.Server.AllowedOrigins, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				allowedOrigins = append(allowedOrigins, trimmed)
+			}
+		}
+	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowOrigins:     allowedOrigins,
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		AllowCredentials: true,
 	}))
 
 	e.Use(middleware.RequestID()) // Adds unique ID to each request

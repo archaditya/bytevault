@@ -66,6 +66,7 @@ type NotificationConfig struct {
 
 type ServerConfig struct {
 	Port string `koanf:"port"`
+	AllowedOrigins string `koanf:"allowedorigins"`
 }
 
 type DatabaseConfig struct {

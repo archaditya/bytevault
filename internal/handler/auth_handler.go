@@ -83,6 +83,13 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	user, tokens, err := h.authService.Login(c.Request().Context(), req.Email, req.Password, &userAgent, &ip)
 	if err != nil {
+		if errors.Is(err, service.ErrMFARequired) {
+			return SendSuccess(c, http.StatusOK, map[string]any{
+				"mfa_required": true,
+				"mfa_token":    tokens.AccessToken,
+				"user":         user,
+			}, nil)
+		}
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			return SendError(c, http.StatusUnauthorized, "Invalid email or password")
 		}
@@ -156,6 +163,85 @@ func (h *AuthHandler) GoogleLogin(c echo.Context) error {
 	user, tokens, err := h.authService.GoogleLogin(c.Request().Context(), req.IDToken, req.FirstName, req.LastName, req.AvatarURL, &ua, &ip)
 	if err != nil {
 		return SendError(c, http.StatusUnauthorized, fmt.Sprintf("Google login failed: %v", err))
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"user":   user,
+		"tokens": tokens,
+	}, nil)
+}
+
+// POST /api/v1/auth/mfa/setup (Protected)
+func (h *AuthHandler) MFASetup(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	secret, qrURI, err := h.authService.SetupMFA(c.Request().Context(), userID)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"secret": secret,
+		"qr_uri": qrURI,
+	}, nil)
+}
+
+// POST /api/v1/auth/mfa/enable (Protected)
+func (h *AuthHandler) MFAEnable(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := c.Bind(&req); err != nil || req.Code == "" {
+		return SendError(c, http.StatusBadRequest, "TOTP code is required")
+	}
+
+	if err := h.authService.EnableMFA(c.Request().Context(), userID, req.Code); err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"message": "MFA enabled successfully",
+	}, nil)
+}
+
+// POST /api/v1/auth/mfa/disable (Protected)
+func (h *AuthHandler) MFADisable(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := c.Bind(&req); err != nil || req.Code == "" {
+		return SendError(c, http.StatusBadRequest, "TOTP code is required")
+	}
+
+	if err := h.authService.DisableMFA(c.Request().Context(), userID, req.Code); err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"message": "MFA disabled successfully",
+	}, nil)
+}
+
+// POST /api/v1/auth/mfa/verify-login (Public)
+func (h *AuthHandler) MFAVerifyLogin(c echo.Context) error {
+	var req struct {
+		MFAToken string `json:"mfa_token"`
+		Code     string `json:"code"`
+	}
+	if err := c.Bind(&req); err != nil || req.MFAToken == "" || req.Code == "" {
+		return SendError(c, http.StatusBadRequest, "mfa_token and code are required")
+	}
+
+	ip := c.RealIP()
+	ua := c.Request().UserAgent()
+
+	user, tokens, err := h.authService.VerifyMFALogin(c.Request().Context(), req.MFAToken, req.Code, &ua, &ip)
+	if err != nil {
+		return SendError(c, http.StatusUnauthorized, err.Error())
 	}
 
 	return SendSuccess(c, http.StatusOK, map[string]any{

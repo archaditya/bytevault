@@ -60,6 +60,7 @@ func (s *Server) registerRoutes() {
 	deviceRepo := repository.NewDeviceRepository(s.db)
 	fileRepo := repository.NewFileRepository(s.db)
 	folderRepo := repository.NewFolderRepository(s.db)
+	shareRepo := repository.NewShareRepository(s.db)
 	verifyRepo := repository.NewEmailVerificationRepository(s.db)
 	notifRepo := repository.NewNotificationRepository(s.db)
 	pushTokenRepo := repository.NewPushTokenRepository(s.db)
@@ -72,6 +73,7 @@ func (s *Server) registerRoutes() {
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT)
 	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue)
 	folderService := service.NewFolderService(folderRepo, fileRepo)
+	shareService := service.NewShareService(shareRepo, userRepo, fileRepo, folderRepo)
 	contactService := service.NewContactService(contactRepo, emailClient)
 
 	// 5. Initialize Handlers
@@ -79,6 +81,7 @@ func (s *Server) registerRoutes() {
 	folderHandler := handler.NewFolderHandler(folderService)
 	notifHandler := handler.NewNotificationHandler(authService, notifService)
 	contactHandler := handler.NewContactHandler(contactService)
+	shareHandler := handler.NewShareHandler(shareService)
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 
 	// 6. Setup Route Groups
@@ -86,11 +89,13 @@ func (s *Server) registerRoutes() {
 
 	// Public routes
 	s.registerHealthRoutes(v1)
-	s.registerAuthRoutes(v1, authService, notifHandler, userRepo)
-
+	
 	// Protected routes (JWT required)
 	authMiddleware := appMiddleware.Auth(authService)
 	protected := v1.Group("", authMiddleware)
+	
+	// Auth routes (needs both v1 for public + protected for MFA)
+	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo)
 
 	// Delegate Route Groupings
 	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
@@ -99,6 +104,7 @@ func (s *Server) registerRoutes() {
 	s.registerAdminRoutes(protected, adminHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
 	s.registerFileRoutes(v1, fileHandler, authMiddleware)
+	s.registerShareRoutes(protected, shareHandler)
 
 	// 7. Start Background Workers and Scheduler
 	if redisQueue != nil {
