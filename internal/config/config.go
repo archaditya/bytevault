@@ -67,6 +67,7 @@ type NotificationConfig struct {
 type ServerConfig struct {
 	Port string `koanf:"port"`
 	AllowedOrigins string `koanf:"allowedorigins"`
+	EphemeralMaxFileSizeBytes int64 `koanf:"ephemeralmaxfilesizebytes"`
 }
 
 type DatabaseConfig struct {
