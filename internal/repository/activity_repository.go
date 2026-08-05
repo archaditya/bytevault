@@ -84,6 +84,42 @@ func (r *ActivityRepository) ListAll(ctx context.Context, limit, offset int) ([]
 	return logs, total, nil
 }
 
+// ListByUser returns paginated activity logs for a specific user with total count
+func (r *ActivityRepository) ListByUser(ctx context.Context, userID string, limit, offset int) ([]model.ActivityLog, int, error) {
+	var total int
+	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM activity_logs WHERE user_id = $1", userID).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+	query := `
+		SELECT id, user_id, action, resource_type, resource_id, metadata, ip_address, user_agent, created_at
+		FROM activity_logs WHERE user_id = $1
+		ORDER BY created_at DESC LIMIT $2 OFFSET $3
+	`
+	rows, err := r.db.Query(ctx, query, userID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list user activity: %w", err)
+	}
+	defer rows.Close()
+	var logs []model.ActivityLog
+	for rows.Next() {
+		var l model.ActivityLog
+		var metaJSON []byte
+		if err := rows.Scan(
+			&l.ID, &l.UserID, &l.Action, &l.ResourceType, &l.ResourceID,
+			&metaJSON, &l.IPAddress, &l.UserAgent, &l.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan user activity log: %w", err)
+		}
+		if metaJSON != nil {
+			json.Unmarshal(metaJSON, &l.Metadata)
+		}
+		logs = append(logs, l)
+	}
+	return logs, total, nil
+}
+
+
 // ListByUserID returns activity logs for a specific user
 func (r *ActivityRepository) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]model.ActivityLog, error) {
 	query := `

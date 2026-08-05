@@ -60,7 +60,7 @@ func (h *AdminHandler) ListUsers(c echo.Context) error {
 		page = 1
 	}
 	if limit < 1 {
-		limit = 20
+		limit = 10
 	}
 	offset := (page - 1) * limit
 
@@ -77,18 +77,18 @@ func (h *AdminHandler) ListUsers(c echo.Context) error {
 			roleName = roleInfo.Name
 		}
 		enriched = append(enriched, map[string]any{
-			"id":          u.ID,
-			"email":       u.Email,
-			"first_name":  u.FirstName,
-			"last_name":   u.LastName,
-			"avatar_url":  u.AvatarURL,
-			"is_verified": u.IsVerified,
-			"status":      u.Status,
+			"id":                  u.ID,
+			"email":               u.Email,
+			"first_name":          u.FirstName,
+			"last_name":           u.LastName,
+			"avatar_url":          u.AvatarURL,
+			"is_verified":         u.IsVerified,
+			"status":              u.Status,
 			"storage_limit_bytes": u.StorageLimitBytes,
 			"max_file_size_bytes": u.MaxFileSizeBytes,
-			"created_at":  u.CreatedAt,
-			"updated_at":  u.UpdatedAt,
-			"role":        roleName,
+			"created_at":          u.CreatedAt,
+			"updated_at":          u.UpdatedAt,
+			"role":                roleName,
 		})
 	}
 
@@ -98,7 +98,33 @@ func (h *AdminHandler) ListUsers(c echo.Context) error {
 		Page:  page,
 	}
 
-	return SendSuccess(c, http.StatusOK, map[string]any{"users": enriched}, pagination)
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"users":      enriched,
+		"pagination": pagination,
+	}, pagination)
+}
+
+// GET /api/v1/admin/users/:id/activity
+func (h *AdminHandler) GetUserActivityLogs(c echo.Context) error {
+	userID := c.Param("id")
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	offset, _ := strconv.Atoi(c.QueryParam("offset"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	logs, total, err := h.activityRepo.ListByUser(c.Request().Context(), userID, limit, offset)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to fetch user activity logs")
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"activities": logs,
+		"total":      total,
+	}, nil)
 }
 
 // GET /api/v1/admin/users/:id
