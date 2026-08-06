@@ -99,7 +99,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	argIndex++
 
 	conditions = append(conditions, "deleted_at IS NULL")
-	conditions = append(conditions, "status = 'READY'")
+	conditions = append(conditions, "(status = 'READY' OR status = 'PENDING_SCAN')")
 
 	// IsPublic, Search, or Folder filter
 	if params.IsPublic != nil && *params.IsPublic {
