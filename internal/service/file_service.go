@@ -66,6 +66,7 @@ type FileService struct {
 	bucket          *string
 	redisQueue      *queue.RedisQueue
 	malwareScanner  security.MalwareScanner
+	activityRepo    *repository.ActivityRepository
 }
 
 func NewFileService(
@@ -75,6 +76,7 @@ func NewFileService(
 	provider string,
 	bucket string,
 	redisQueue *queue.RedisQueue,
+	activityRepo *repository.ActivityRepository,
 ) *FileService {
 	var bPtr *string
 	if bucket != "" {
@@ -88,7 +90,21 @@ func NewFileService(
 		bucket:          bPtr,
 		redisQueue:      redisQueue,
 		malwareScanner:  security.NewDefaultMalwareScanner(),
+		activityRepo:    activityRepo,
 	}
+}
+
+func (s *FileService) logActivity(ctx context.Context, userID, action, resourceType, resourceID string, meta map[string]any) {
+	if s.activityRepo == nil {
+		return
+	}
+	_ = s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &userID,
+		Action:       action,
+		ResourceType: &resourceType,
+		ResourceID:   &resourceID,
+		Metadata:     meta,
+	})
 }
 
 // enqueueMediaProcessingJob safely triggers asynchronous background thumbnail generation
@@ -181,6 +197,11 @@ func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename 
 		return nil, "", err
 	}
 
+	s.logActivity(ctx, userID, "file.upload_session", "file", fileMeta.ID, map[string]any{
+		"filename":  filename,
+		"file_size": size,
+	})
+
 	return fileMeta, uploadURL, nil
 }
 
@@ -234,6 +255,12 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string)
 		return err
 	}
 	s.enqueueMediaProcessingJob(ctx, file)
+
+	s.logActivity(ctx, userID, "file.upload_completed", "file", file.ID, map[string]any{
+		"filename":  file.Filename,
+		"file_size": file.FileSize,
+	})
+
 	return nil
 }
 
@@ -322,6 +349,11 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		return "", nil, fmt.Errorf("failed to generate download URL: %w", err)
 	}
 
+	s.logActivity(ctx, userID, "file.download", "file", file.ID, map[string]any{
+		"filename":  file.Filename,
+		"file_size": file.FileSize,
+	})
+
 	return url, file, nil
 }
 
@@ -386,6 +418,11 @@ func (s *FileService) MoveFile(ctx context.Context, fileID, userID string, folde
 		folderID = nil
 	}
 
+	s.logActivity(ctx, userID, "file.move", "file", file.ID, map[string]any{
+		"from_folder": file.FolderID,
+		"to_folder":   folderID,
+	})
+
 	return s.repo.MoveFile(ctx, fileID, folderID)
 }
 
@@ -400,6 +437,11 @@ func (s *FileService) Delete(ctx context.Context, fileID, userID string) error {
 	if file.UserID != userID {
 		return fmt.Errorf("unauthorized")
 	}
+
+	s.logActivity(ctx, userID, "file.delete", "file", file.ID, map[string]any{
+		"filename":  file.Filename,
+		"file_size": file.FileSize,
+	})
 
 	// Soft delete only — R2 cleanup happens via scheduler after 30-day cooldown
 	return s.repo.SoftDelete(ctx, fileID)
@@ -486,6 +528,11 @@ func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, 
 		return nil, "", nil, err
 	}
 
+	s.logActivity(ctx, userID, "file.upload_session", "file", fileMeta.ID, map[string]any{
+		"filename":  filename,
+		"file_size": size,
+	})
+
 	return fileMeta, uploadID, partsURLs, nil
 }
 
@@ -545,6 +592,11 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 
 	s.enqueueMediaProcessingJob(ctx, file)
 
+	s.logActivity(ctx, userID, "file.upload_completed", "file", file.ID, map[string]any{
+		"filename":  file.Filename,
+		"file_size": file.FileSize,
+	})
+
 	return nil
 }
 
@@ -561,6 +613,12 @@ func (s *FileService) AbortMultipartUpload(ctx context.Context, fileID, userID s
 	}
 
 	_ = s.storage.AbortMultipartUpload(ctx, file.StorageKey, uploadID)
+
+	s.logActivity(ctx, userID, "file.upload_aborted", "file", file.ID, map[string]any{
+		"filename":  file.Filename,
+		"file_size": file.FileSize,
+	})
+
 	return s.repo.UpdateStatus(ctx, fileID, "FAILED")
 }
 
@@ -592,6 +650,11 @@ func (s *FileService) RefreshMultipartPartURLs(ctx context.Context, fileID, user
 			"url":         url,
 		})
 	}
+
+	s.logActivity(ctx, userID, "file.refresh_presigned_urls", "file", file.ID, map[string]any{
+		"filename":  file.Filename,
+		"file_size": file.FileSize,
+	})
 
 	return refreshedURLs, nil
 }

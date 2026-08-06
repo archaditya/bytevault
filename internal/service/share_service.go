@@ -11,10 +11,11 @@ import (
 )
 
 type ShareService struct {
-	shareRepo  *repository.ShareRepository
-	userRepo   *repository.UserRepository
-	fileRepo   *repository.FileRepository
-	folderRepo *repository.FolderRepository
+	shareRepo    *repository.ShareRepository
+	userRepo     *repository.UserRepository
+	fileRepo     *repository.FileRepository
+	folderRepo   *repository.FolderRepository
+	activityRepo *repository.ActivityRepository
 }
 
 func NewShareService(
@@ -22,13 +23,31 @@ func NewShareService(
 	userRepo *repository.UserRepository,
 	fileRepo *repository.FileRepository,
 	folderRepo *repository.FolderRepository,
+	activityRepo *repository.ActivityRepository,
 ) *ShareService {
 	return &ShareService{
-		shareRepo:  shareRepo,
-		userRepo:   userRepo,
-		fileRepo:   fileRepo,
+		shareRepo:    shareRepo,
+		userRepo:     userRepo,
+		fileRepo:     fileRepo,
 		folderRepo: folderRepo,
+		activityRepo: activityRepo,
 	}
+}
+
+func (s *ShareService) logActivity(ctx context.Context, userID, action, resourceID string, meta map[string]any) {
+	if s.activityRepo == nil {
+		return
+	}
+
+	resType := "share"
+
+	_ = s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &userID,
+		Action:       action,
+		ResourceType: &resType,
+		ResourceID:   &resourceID,
+		Metadata:     meta,
+	})
 }
 
 // GrantShare verifies resource ownership and grants permission to grantee email
@@ -81,6 +100,12 @@ func (s *ShareService) GrantShare(ctx context.Context, ownerID, resourceType, re
 		return nil, fmt.Errorf("failed to grant share: %w", err)
 	}
 
+	s.logActivity(ctx, ownerID, "share.created", resourceID, map[string]any{
+		"resource_type": resourceType,
+		"grantee_email": granteeEmail,
+		"permission":    permission,
+	})
+
 	return share, nil
 }
 
@@ -93,6 +118,20 @@ func (s *ShareService) ListSharedWithMe(ctx context.Context, userEmail string) (
 }
 
 func (s *ShareService) RevokeShare(ctx context.Context, ownerID, shareID string) error {
+	share, err := s.shareRepo.FindByID(ctx, shareID)
+	if err != nil {
+		return err
+	}
+
+	if share.OwnerID != ownerID {
+		return errors.New("unauthorized")
+	}
+
+	s.logActivity(ctx, ownerID, "share.revoked", share.ResourceID, map[string]any{
+		"resource_type": share.ResourceType,
+		"grantee_email": share.GranteeEmail,
+		"permission":    share.Permission,
+	})
 	return s.shareRepo.Revoke(ctx, shareID, ownerID)
 }
 

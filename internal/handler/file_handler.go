@@ -438,12 +438,10 @@ func (h *FileHandler) GetThumbnail(c echo.Context) error {
 
 	url, _, err := h.service.GetThumbnail(c.Request().Context(), fileID, userID)
 	if err != nil {
-		// Fall back to original file download if thumbnail not ready or non-image
-		url, _, err = h.service.Download(c.Request().Context(), fileID, userID, true)
-		if err != nil {
-			return SendError(c, http.StatusNotFound, err.Error())
-		}
+		// Return 404 if thumbnail is not available instead of redirecting <img> tag to raw video/pdf stream
+		return SendError(c, http.StatusNotFound, "thumbnail not available for this file")
 	}
 
 	return c.Redirect(http.StatusFound, url)
 }
+

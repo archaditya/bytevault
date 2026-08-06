@@ -19,6 +19,25 @@ func NewShareRepository(db *pgxpool.Pool) *ShareRepository {
 	return &ShareRepository{db: db}
 }
 
+func (r *ShareRepository) FindByID(ctx context.Context, shareID string) (*model.Share, error) {
+	query := `
+		SELECT id, resource_type, resource_id, owner_id, grantee_email, grantee_id, permission, created_at, updated_at
+		FROM shares
+		WHERE id = $1
+	`
+	var s model.Share
+	err := r.db.QueryRow(ctx, query, shareID).Scan(
+		&s.ID, &s.ResourceType, &s.ResourceID, &s.OwnerID, &s.GranteeEmail, &s.GranteeID, &s.Permission, &s.CreatedAt, &s.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("share not found")
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
 func (r *ShareRepository) Create(ctx context.Context, share *model.Share) error {
 	query := `
 		INSERT INTO shares (resource_type, resource_id, owner_id, grantee_email, grantee_id, permission, created_at, updated_at)

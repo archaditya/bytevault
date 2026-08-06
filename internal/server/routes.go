@@ -73,9 +73,9 @@ func (s *Server) registerRoutes() {
 	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, pushTokenRepo, userRepo)
 	authProviderRepo := repository.NewAuthProviderRepository(s.db)
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT)
-	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue)
-	folderService := service.NewFolderService(folderRepo, fileRepo)
-	shareService := service.NewShareService(shareRepo, userRepo, fileRepo, folderRepo)
+	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue, activityRepo)
+	folderService := service.NewFolderService(folderRepo, fileRepo, activityRepo)
+	shareService := service.NewShareService(shareRepo, userRepo, fileRepo, folderRepo, activityRepo)
 	ephemeralService := service.NewEphemeralService(ephemeralRepo, ephemeralSettingRepo, store)
 	contactService := service.NewContactService(contactRepo, emailClient)
 

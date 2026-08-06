@@ -40,7 +40,9 @@ func NewWorkerPool(
 	var fcmClient *messaging.Client
 	if cfg.Notification.Firebase.CredentialsFile != "" {
 		opt := option.WithCredentialsFile(cfg.Notification.Firebase.CredentialsFile)
-		app, err := firebase.NewApp(ctx, nil, opt)
+		app, err := firebase.NewApp(ctx, &firebase.Config{
+			ProjectID: "personal-project-933",
+		}, opt)
 		if err == nil {
 			messagingClient, err := app.Messaging(ctx)
 			if err == nil {
