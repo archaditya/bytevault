@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -112,6 +113,9 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 		thumbnailBytes, err = w.processVideo(ctx, file)
 	case contentType == "application/pdf" || ext == ".pdf":
 		thumbnailBytes, err = w.processPDF(ctx, file)
+	default:
+		// Documents, spreadsheets, text files — generate branded poster
+		thumbnailBytes = generateDocumentPoster(ext)
 	}
 
 	if err == nil && len(thumbnailBytes) > 0 {
@@ -159,8 +163,8 @@ func (w *MediaWorker) processImage(ctx context.Context, file *model.File) ([]byt
 func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byte, error) {
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		logger.Log.Warn().Msg("FFmpeg executable not found on host. Video thumbnail skipped.")
-		return nil, nil
+		logger.Log.Warn().Str("file_id", file.ID).Msg("FFmpeg not found. Using fallback poster for video thumbnail.")
+		return generateDocumentPoster(filepath.Ext(file.Filename)), nil
 	}
 
 	stream, err := w.storage.Download(ctx, file.StorageKey)
@@ -188,23 +192,28 @@ func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byt
 		"-ss", "00:00:01",
 		"-i", tmpInput,
 		"-vframes", "1",
-		"-vf", "scale=300:300:force_original_aspect_ratio=decrease",
+		"-vf", "scale=300:-1",
 		tmpOutput,
 	)
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ffmpeg extraction failed: %w", err)
+		logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("FFmpeg frame extraction failed. Using fallback poster.")
+		return generateDocumentPoster(filepath.Ext(file.Filename)), nil
 	}
 
-	return os.ReadFile(tmpOutput)
+	data, err := os.ReadFile(tmpOutput)
+	if err != nil || len(data) == 0 {
+		return generateDocumentPoster(filepath.Ext(file.Filename)), nil
+	}
+	return data, nil
 }
 
 // 3. PDF Handler (pdftoppm Poppler subprocess rendering)
 func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte, error) {
 	pdftoppmPath, err := exec.LookPath("pdftoppm")
 	if err != nil {
-		logger.Log.Warn().Msg("pdftoppm executable not found on host. PDF thumbnail skipped.")
-		return nil, nil
+		logger.Log.Warn().Str("file_id", file.ID).Msg("pdftoppm not found. Using fallback poster for PDF thumbnail.")
+		return generateDocumentPoster(".pdf"), nil
 	}
 
 	stream, err := w.storage.Download(ctx, file.StorageKey)
@@ -237,11 +246,16 @@ func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte,
 	)
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("pdftoppm rendering failed: %w", err)
+		logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("pdftoppm rendering failed. Using fallback poster.")
+		return generateDocumentPoster(".pdf"), nil
 	}
 
 	renderedFile := tmpOutPrefix + "-1.jpg"
-	return os.ReadFile(renderedFile)
+	data, err := os.ReadFile(renderedFile)
+	if err != nil || len(data) == 0 {
+		return generateDocumentPoster(".pdf"), nil
+	}
+	return data, nil
 }
 
 func resizeImageToJPEG(srcImg image.Image, maxDim int) ([]byte, error) {
@@ -275,4 +289,145 @@ func resizeImageToJPEG(srcImg image.Image, maxDim int) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// generateDocumentPoster creates a branded 300x300 placeholder thumbnail for non-image files.
+// Uses a color-coded background based on file extension with the extension label centered.
+func generateDocumentPoster(ext string) []byte {
+	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
+	if ext == "" {
+		ext = "FILE"
+	} else {
+		ext = strings.ToUpper(ext)
+	}
+
+	// Color palette based on file category
+	var bgR, bgG, bgB uint8
+	switch ext {
+	case "MP4", "MOV", "MKV", "WEBM", "AVI":
+		bgR, bgG, bgB = 139, 92, 246 // Purple for video
+	case "PDF":
+		bgR, bgG, bgB = 239, 68, 68 // Red for PDF
+	case "DOC", "DOCX":
+		bgR, bgG, bgB = 59, 130, 246 // Blue for Word
+	case "XLS", "XLSX", "CSV":
+		bgR, bgG, bgB = 34, 197, 94 // Green for spreadsheets
+	case "PPT", "PPTX":
+		bgR, bgG, bgB = 249, 115, 22 // Orange for presentations
+	case "TXT", "MD":
+		bgR, bgG, bgB = 107, 114, 128 // Gray for text
+	case "ZIP", "RAR", "7Z", "TAR":
+		bgR, bgG, bgB = 168, 85, 247 // Violet for archives
+	default:
+		bgR, bgG, bgB = 75, 85, 99 // Neutral gray
+	}
+
+	width, height := 300, 300
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	// Fill background
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.SetRGBA(x, y, colorRGBA(bgR, bgG, bgB, 255))
+		}
+	}
+
+	// Draw a centered lighter rectangle as a "document card" effect (80x100 centered)
+	cardLeft, cardTop := 110, 80
+	cardRight, cardBottom := 190, 220
+	for y := cardTop; y < cardBottom; y++ {
+		for x := cardLeft; x < cardRight; x++ {
+			img.SetRGBA(x, y, colorRGBA(255, 255, 255, 40))
+		}
+	}
+
+	// Draw extension text as pixel blocks (simple 5x7 bitmap font for up to 4 chars)
+	drawExtLabel(img, ext, width, height)
+
+	var buf bytes.Buffer
+	_ = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80})
+	return buf.Bytes()
+}
+
+func colorRGBA(r, g, b, a uint8) color.RGBA {
+	return color.RGBA{R: r, G: g, B: b, A: a}
+}
+
+// drawExtLabel renders a simple pixel-font extension label centered on the image
+func drawExtLabel(img *image.RGBA, label string, imgW, imgH int) {
+	// Simple 5x7 bitmap font for A-Z, 0-9
+	glyphs := map[byte][7]uint8{
+		'A': {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
+		'B': {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E},
+		'C': {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E},
+		'D': {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E},
+		'E': {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F},
+		'F': {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},
+		'G': {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E},
+		'H': {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
+		'I': {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},
+		'J': {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C},
+		'K': {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11},
+		'L': {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F},
+		'M': {0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11},
+		'N': {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11},
+		'O': {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
+		'P': {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},
+		'Q': {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D},
+		'R': {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},
+		'S': {0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E},
+		'T': {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04},
+		'U': {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
+		'V': {0x11, 0x11, 0x11, 0x11, 0x0A, 0x0A, 0x04},
+		'W': {0x11, 0x11, 0x11, 0x11, 0x15, 0x1B, 0x11},
+		'X': {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11},
+		'Y': {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04},
+		'Z': {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
+		'0': {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},
+		'1': {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},
+		'2': {0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F},
+		'3': {0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E},
+		'4': {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},
+		'5': {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E},
+		'6': {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E},
+		'7': {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},
+		'8': {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},
+		'9': {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C},
+	}
+
+	scale := 4
+	charW := 5 * scale
+	charH := 7 * scale
+	gap := 2 * scale
+
+	if len(label) > 4 {
+		label = label[:4]
+	}
+
+	totalW := len(label)*charW + (len(label)-1)*gap
+	startX := (imgW - totalW) / 2
+	startY := (imgH - charH) / 2
+
+	for ci, ch := range label {
+		glyph, ok := glyphs[byte(ch)]
+		if !ok {
+			continue
+		}
+		ox := startX + ci*(charW+gap)
+		for row := 0; row < 7; row++ {
+			for col := 0; col < 5; col++ {
+				if glyph[row]&(1<<uint(4-col)) != 0 {
+					for dy := 0; dy < scale; dy++ {
+						for dx := 0; dx < scale; dx++ {
+							px := ox + col*scale + dx
+							py := startY + row*scale + dy
+							if px >= 0 && px < imgW && py >= 0 && py < imgH {
+								img.SetRGBA(px, py, colorRGBA(255, 255, 255, 220))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }

@@ -9,15 +9,33 @@ import (
 )
 
 type FolderService struct {
-	repo     *repository.FolderRepository
-	fileRepo *repository.FileRepository
+	repo         *repository.FolderRepository
+	fileRepo     *repository.FileRepository
+	activityRepo *repository.ActivityRepository
 }
 
-func NewFolderService(repo *repository.FolderRepository, fileRepo *repository.FileRepository) *FolderService {
+func NewFolderService(repo *repository.FolderRepository, fileRepo *repository.FileRepository, activityRepo *repository.ActivityRepository) *FolderService {
 	return &FolderService{
-		repo:     repo,
+		repo:         repo,
 		fileRepo: fileRepo,
+		activityRepo: activityRepo,
 	}
+}
+
+func (s *FolderService) logActivity(ctx context.Context, userID, action, resourceID string, meta map[string]any) {
+	if s.activityRepo == nil {
+		return
+	}
+
+	resType := "folder"
+
+	_ = s.activityRepo.Log(ctx, &model.ActivityLog{
+		UserID:       &userID,
+		Action:       action,
+		ResourceType: &resType,
+		ResourceID:   &resourceID,
+		Metadata:     meta,
+	})
 }
 
 func (s *FolderService) CreateFolder(ctx context.Context, userID, name string, parentID *string) (*model.Folder, error) {
@@ -48,6 +66,11 @@ func (s *FolderService) CreateFolder(ctx context.Context, userID, name string, p
 	if err := s.repo.Create(ctx, folder); err != nil {
 		return nil, err
 	}
+
+	s.logActivity(ctx, userID, "folder.created", folder.ID, map[string]any{
+		"folder_name": folder.Name,
+		"parent_id":   parentID,
+	})
 
 	return folder, nil
 }
@@ -88,6 +111,12 @@ func (s *FolderService) MoveFolder(ctx context.Context, id, userID string, paren
 		}
 	}
 
+	s.logActivity(ctx, userID, "folder.moved", id, map[string]any{
+		"folder_name": folder.Name,
+		"old_parent_id": folder.ParentID,
+		"new_parent_id": parentID,
+	})
+
 	return s.repo.UpdateParent(ctx, id, parentID)
 }
 
@@ -104,6 +133,11 @@ func (s *FolderService) RenameFolder(ctx context.Context, id, userID, name strin
 		return errors.New("folder not found or unauthorized")
 	}
 
+	s.logActivity(ctx, userID, "folder.renamed", id, map[string]any{
+		"folder_name": name,
+		"old_name":    folder.Name,
+	})
+
 	return s.repo.Rename(ctx, id, name)
 }
 
@@ -115,6 +149,11 @@ func (s *FolderService) ToggleShareStatus(ctx context.Context, id, userID string
 	if folder == nil || folder.UserID != userID {
 		return errors.New("folder not found or unauthorized")
 	}
+
+	s.logActivity(ctx, userID, "folder.shared", id, map[string]any{
+		"folder_name": folder.Name,
+		"is_public":   isPublic,
+	})
 
 	return s.repo.UpdatePublicStatus(ctx, id, isPublic)
 }
@@ -146,6 +185,10 @@ func (s *FolderService) DeleteFolder(ctx context.Context, id, userID string) err
 	if folder == nil || folder.UserID != userID {
 		return errors.New("folder not found or unauthorized")
 	}
+
+	s.logActivity(ctx, userID, "folder.deleted", id, map[string]any{
+		"folder_name": folder.Name,
+	})
 
 	return s.repo.SoftDelete(ctx, id)
 }
