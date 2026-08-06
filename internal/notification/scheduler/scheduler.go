@@ -40,13 +40,13 @@ func NewScheduler(
 }
 
 func (s *Scheduler) Start() {
-	s.ticker = time.NewTicker(6 * time.Hour)
+	s.ticker = time.NewTicker(24 * time.Hour)
 	go func() {
-		// Wait for 1 minute on startup before running cleanups to let the system stabilize
+		// Wait for 24 hours on startup before running cleanups to let the system stabilize
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-time.After(1 * time.Minute):
+		case <-time.After(24 * time.Hour):
 			s.cleanup()
 		}
 

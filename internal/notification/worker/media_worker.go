@@ -121,8 +121,11 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 	if err == nil && len(thumbnailBytes) > 0 {
 		thumbnailKey := fmt.Sprintf("user/%s/thumbnails/%s.jpg", file.UserID, file.ID)
 		_, uploadErr := w.storage.Upload(ctx, thumbnailKey, bytes.NewReader(thumbnailBytes), int64(len(thumbnailBytes)), "image/jpeg")
-		if uploadErr == nil {
+		if uploadErr != nil {
+			logger.Log.Error().Err(uploadErr).Str("file_id", file.ID).Msg("❌ Failed to upload thumbnail to storage")
+		} else {
 			_ = w.fileRepo.UpdateThumbnailKey(ctx, file.ID, thumbnailKey)
+			logger.Log.Info().Str("file_id", file.ID).Str("thumbnail_key", thumbnailKey).Msg("🖼️ Thumbnail uploaded & updated successfully")
 		}
 	}
 

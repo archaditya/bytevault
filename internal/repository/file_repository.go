@@ -381,9 +381,9 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	return files, nextCursor, nil
 }
 
-// GetAllStorageKeys returns a map of all active file storage keys.
+// GetAllStorageKeys returns a map of all active file storage keys AND thumbnail keys.
 func (r *FileRepository) GetAllStorageKeys(ctx context.Context) (map[string]bool, error) {
-	query := `SELECT storage_key FROM files`
+	query := `SELECT storage_key, thumbnail_key FROM files`
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -393,8 +393,12 @@ func (r *FileRepository) GetAllStorageKeys(ctx context.Context) (map[string]bool
 	keys := make(map[string]bool)
 	for rows.Next() {
 		var key string
-		if err := rows.Scan(&key); err == nil {
+		var thumbKey *string
+		if err := rows.Scan(&key, &thumbKey); err == nil {
 			keys[key] = true
+			if thumbKey != nil && *thumbKey != "" {
+				keys[*thumbKey] = true
+			}
 		}
 	}
 	return keys, nil
