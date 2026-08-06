@@ -390,7 +390,22 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 }
 
 func (s *FileService) ListUserFiles(ctx context.Context, params repository.ListFilesParams) ([]*model.File, string, error) {
-	return s.repo.ListByUserID(ctx, params)
+	files, nextCursor, err := s.repo.ListByUserID(ctx, params)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Enrich files with direct presigned thumbnail URLs in the JSON response
+	for _, f := range files {
+		if f.ThumbnailKey != nil && *f.ThumbnailKey != "" {
+			url, err := s.storage.GeneratePresignedDownloadURL(ctx, *f.ThumbnailKey, 30*time.Minute, f.Filename, true)
+			if err == nil {
+				f.ThumbnailURL = &url
+			}
+		}
+	}
+
+	return files, nextCursor, nil
 }
 
 func (s *FileService) ToggleShareStatus(ctx context.Context, fileID, userID string, isPublic bool) error {
