@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"os"
 	"time"
 
 	firebase "firebase.google.com/go/v4"
@@ -38,22 +39,31 @@ func NewWorkerPool(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var fcmClient *messaging.Client
-	if cfg.Notification.Firebase.CredentialsFile != "" {
-		opt := option.WithCredentialsFile(cfg.Notification.Firebase.CredentialsFile)
-		app, err := firebase.NewApp(ctx, &firebase.Config{
-			ProjectID: "personal-project-933",
-		}, opt)
-		if err == nil {
-			messagingClient, err := app.Messaging(ctx)
-			if err == nil {
-				fcmClient = messagingClient
-				logger.Log.Info().Msg("Firebase Admin initialized successfully")
-			} else {
-				logger.Log.Warn().Err(err).Msg("Failed to initialize Firebase Messaging client")
-			}
+	credPath := cfg.Notification.Firebase.CredentialsFile
+	if credPath == "" {
+		credPath = os.Getenv("NOTIFICATION_FIREBASE_CREDENTIALSFILE")
+	}
+
+	if credPath != "" {
+		if _, err := os.Stat(credPath); os.IsNotExist(err) {
+			logger.Log.Warn().Str("path", credPath).Msg("Firebase credentials file specified but not found on filesystem")
 		} else {
-			logger.Log.Warn().Err(err).Msg("Failed to initialize Firebase App")
+			opt := option.WithCredentialsFile(credPath)
+			app, err := firebase.NewApp(ctx, nil, opt)
+			if err != nil {
+				logger.Log.Warn().Err(err).Msg("Failed to initialize Firebase App")
+			} else {
+				messagingClient, err := app.Messaging(ctx)
+				if err != nil {
+					logger.Log.Warn().Err(err).Msg("Failed to initialize Firebase Messaging client")
+				} else {
+					fcmClient = messagingClient
+					logger.Log.Info().Str("credentials_file", credPath).Msg("Firebase Admin initialized successfully")
+				}
+			}
 		}
+	} else {
+		logger.Log.Info().Msg("No Firebase credentials file configured (NOTIFICATION_FIREBASE_CREDENTIALSFILE)")
 	}
 
 	return &WorkerPool{
