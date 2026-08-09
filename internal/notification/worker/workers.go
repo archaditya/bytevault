@@ -18,14 +18,14 @@ import (
 )
 
 type WorkerPool struct {
-	queue         *queue.RedisQueue
-	emailClient   *email.BrevoClient
-	fcmClient     *messaging.Client
-	userRepo      *repository.UserRepository
-	notifRepo     *repository.NotificationRepository
-	pushTokenRepo *repository.PushTokenRepository
-	ctx           context.Context
-	cancel        context.CancelFunc
+	queue      *queue.RedisQueue
+	emailClient *email.BrevoClient
+	fcmClient  *messaging.Client
+	userRepo   *repository.UserRepository
+	notifRepo  *repository.NotificationRepository
+	deviceRepo *repository.DeviceRepository
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 func NewWorkerPool(
@@ -34,7 +34,7 @@ func NewWorkerPool(
 	emailClient *email.BrevoClient,
 	userRepo *repository.UserRepository,
 	notifRepo *repository.NotificationRepository,
-	pushTokenRepo *repository.PushTokenRepository,
+	deviceRepo *repository.DeviceRepository,
 ) (*WorkerPool, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -67,14 +67,14 @@ func NewWorkerPool(
 	}
 
 	return &WorkerPool{
-		queue:         q,
-		emailClient:   emailClient,
-		fcmClient:     fcmClient,
-		userRepo:      userRepo,
-		notifRepo:     notifRepo,
-		pushTokenRepo: pushTokenRepo,
-		ctx:           ctx,
-		cancel:        cancel,
+		queue:      q,
+		emailClient: emailClient,
+		fcmClient:  fcmClient,
+		userRepo:   userRepo,
+		notifRepo:  notifRepo,
+		deviceRepo: deviceRepo,
+		ctx:        ctx,
+		cancel:     cancel,
 	}, nil
 }
 
@@ -174,16 +174,16 @@ func (wp *WorkerPool) runPushWorker(id int) {
 			title, _ := job.Payload["title"].(string)
 			body, _ := job.Payload["body"].(string)
 
-			// Get all active push tokens for user
-			tokens, err := wp.pushTokenRepo.GetActiveByUser(wp.ctx, job.UserID)
+			// Get all active devices for user
+			devices, err := wp.deviceRepo.FindByUserID(wp.ctx, job.UserID)
 			if err != nil {
-				logger.Log.Error().Err(err).Str("user_id", job.UserID).Msg("Failed to query user push tokens")
+				logger.Log.Error().Err(err).Str("user_id", job.UserID).Msg("Failed to query user devices")
 				continue
 			}
 
-			for _, t := range tokens {
+			for _, d := range devices {
 				message := &messaging.Message{
-					Token: t.Token,
+					Token: d.FcmToken,
 					Notification: &messaging.Notification{
 						Title: title,
 						Body:  body,
@@ -191,8 +191,8 @@ func (wp *WorkerPool) runPushWorker(id int) {
 				}
 				_, sendErr := wp.fcmClient.Send(wp.ctx, message)
 				if sendErr != nil {
-					logger.Log.Warn().Err(sendErr).Str("token", t.Token).Msg("Failed to send push, deactivating token")
-					wp.pushTokenRepo.Deactivate(wp.ctx, t.Token)
+					logger.Log.Warn().Err(sendErr).Str("token", d.FcmToken).Msg("Failed to send push, deactivating device")
+					wp.deviceRepo.DeactivateByToken(wp.ctx, d.FcmToken)
 				}
 			}
 		}

@@ -69,3 +69,19 @@ func (r *DeviceRepository) Deactivate(ctx context.Context, id, userID string) er
 	_, err := r.db.Exec(ctx, query, id, userID)
 	return err
 }
+
+// DeactivateByToken marks a device inactive by its FCM token string.
+// Used by the push worker when Firebase reports a token as invalid.
+func (r *DeviceRepository) DeactivateByToken(ctx context.Context, fcmToken string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE user_devices SET is_active = false, updated_at = NOW() WHERE fcm_token = $1`,
+		fcmToken,
+	)
+	return err
+}
+
+// DeleteByUser removes all device entries for a user (e.g. on logout from all devices).
+func (r *DeviceRepository) DeleteByUser(ctx context.Context, userID string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM user_devices WHERE user_id = $1`, userID)
+	return err
+}

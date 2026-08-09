@@ -29,14 +29,3 @@ type Notification struct {
 	ReadAt    *time.Time     `json:"read_at,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 }
-
-// PushToken stores Firebase device tokens for push notifications.
-type PushToken struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"user_id"`
-	Token      string    `json:"token"`
-	DeviceType string    `json:"device_type"` // "web", "android", "ios"
-	IsActive   bool      `json:"is_active"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}

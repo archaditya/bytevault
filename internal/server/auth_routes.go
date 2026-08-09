@@ -38,7 +38,6 @@ func (s *Server) registerNotificationRoutes(protected *Group, notifHandler *hand
 	protected.GET("/notifications", notifHandler.ListNotifications)
 	protected.POST("/notifications/:id/read", notifHandler.MarkAsRead)
 	protected.POST("/notifications/read-all", notifHandler.MarkAllAsRead)
-	protected.POST("/push-tokens", notifHandler.RegisterPushToken)
 
 	// Admin Broadcast & Logs
 	protected.POST("/notifications/admin/send", notifHandler.SendAdminNotification, appMiddleware.RequirePermission("admin:users"))
