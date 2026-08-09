@@ -56,7 +56,7 @@ type BrevoConfig struct {
 }
 
 type FirebaseConfig struct {
-	CredentialsFile string `koanf:"credentialsFile"`
+	CredentialsFile string `koanf:"credentialsfile"`
 }
 
 type NotificationConfig struct {
