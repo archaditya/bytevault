@@ -14,26 +14,26 @@ import (
 )
 
 type NotificationService struct {
-	queue         *queue.RedisQueue
-	notifRepo     *repository.NotificationRepository
-	verifyRepo    *repository.EmailVerificationRepository
-	pushTokenRepo *repository.PushTokenRepository
-	userRepo      *repository.UserRepository
+	queue      *queue.RedisQueue
+	notifRepo  *repository.NotificationRepository
+	verifyRepo *repository.EmailVerificationRepository
+	deviceRepo *repository.DeviceRepository
+	userRepo   *repository.UserRepository
 }
 
 func NewNotificationService(
 	q *queue.RedisQueue,
 	notifRepo *repository.NotificationRepository,
 	verifyRepo *repository.EmailVerificationRepository,
-	pushTokenRepo *repository.PushTokenRepository,
+	deviceRepo *repository.DeviceRepository,
 	userRepo *repository.UserRepository,
 ) *NotificationService {
 	return &NotificationService{
-		queue:         q,
-		notifRepo:     notifRepo,
-		verifyRepo:    verifyRepo,
-		pushTokenRepo: pushTokenRepo,
-		userRepo:      userRepo,
+		queue:      q,
+		notifRepo:  notifRepo,
+		verifyRepo: verifyRepo,
+		deviceRepo: deviceRepo,
+		userRepo:   userRepo,
 	}
 }
 
@@ -170,14 +170,14 @@ func (s *NotificationService) QueueInAppNotification(ctx context.Context, userID
 	return s.queue.Enqueue(ctx, job)
 }
 
-// RegisterPushToken registers/updates a Firebase token.
-func (s *NotificationService) RegisterPushToken(ctx context.Context, userID, token, deviceType string) error {
-	t := &model.PushToken{
+// RegisterPushToken registers/updates a Firebase FCM token in the user_devices table.
+func (s *NotificationService) RegisterPushToken(ctx context.Context, userID, fcmToken, deviceType string) error {
+	device := &model.UserDevice{
 		UserID:     userID,
-		Token:      token,
+		FcmToken:   fcmToken,
 		DeviceType: deviceType,
 	}
-	return s.pushTokenRepo.Upsert(ctx, t)
+	return s.deviceRepo.Upsert(ctx, device)
 }
 
 // ListInApp paginates user notifications.

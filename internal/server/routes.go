@@ -65,12 +65,11 @@ func (s *Server) registerRoutes() {
 	ephemeralSettingRepo := repository.NewEphemeralSettingRepository(s.db)
 	verifyRepo := repository.NewEmailVerificationRepository(s.db)
 	notifRepo := repository.NewNotificationRepository(s.db)
-	pushTokenRepo := repository.NewPushTokenRepository(s.db)
 	contactRepo := repository.NewContactRepository(s.db)
 
 	// 4. Initialize Services
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
-	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, pushTokenRepo, userRepo)
+	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, deviceRepo, userRepo)
 	authProviderRepo := repository.NewAuthProviderRepository(s.db)
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT)
 	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue, activityRepo)
@@ -113,7 +112,7 @@ func (s *Server) registerRoutes() {
 
 	// 7. Start Background Workers and Scheduler
 	if redisQueue != nil {
-		wp, err := worker.NewWorkerPool(s.config, redisQueue, emailClient, userRepo, notifRepo, pushTokenRepo)
+		wp, err := worker.NewWorkerPool(s.config, redisQueue, emailClient, userRepo, notifRepo, deviceRepo)
 		if err != nil {
 			logger.Log.Error().Err(err).Msg("Failed to start notification workers")
 		} else {
