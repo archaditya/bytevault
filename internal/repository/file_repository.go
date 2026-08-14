@@ -13,14 +13,15 @@ import (
 )
 
 type ListFilesParams struct {
-	UserID     string
-	FolderID   *string
-	Search     string
-	SortBy     string // name, size, date
-	SortDir    string // asc, desc
-	Limit      int
-	Cursor     string // RFC3339 timestamp
-	IsPublic   *bool
+	UserID       string
+	FilterFolder bool
+	FolderID     *string
+	Search       string
+	SortBy       string // name, size, date
+	SortDir      string // asc, desc
+	Limit        int
+	Cursor       string // RFC3339 timestamp
+	IsPublic     *bool
 }
 
 type FileRepository struct {
@@ -108,7 +109,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
 		args = append(args, "%"+params.Search+"%")
 		argIndex++
-	} else {
+	} else if params.FilterFolder {
 		if params.FolderID != nil && *params.FolderID != "" {
 			conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIndex))
 			args = append(args, *params.FolderID)
@@ -216,6 +217,12 @@ func (r *FileRepository) UpdateStatus(ctx context.Context, id string, status str
 func (r *FileRepository) MoveFile(ctx context.Context, id string, folderID *string) error {
 	query := `UPDATE files SET folder_id = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.Exec(ctx, query, folderID, id)
+	return err
+}
+
+func (r *FileRepository) RenameFile(ctx context.Context, id string, filename string) error {
+	query := `UPDATE files SET filename = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, filename, id)
 	return err
 }
 
