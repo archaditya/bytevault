@@ -212,10 +212,17 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 func (h *FileHandler) List(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
-	folderIDStr := c.QueryParam("folder_id")
+	filterFolder := false
 	var folderID *string
-	if folderIDStr != "" {
-		folderID = &folderIDStr
+
+	if c.QueryParams().Has("folder_id") {
+		folderIDStr := c.QueryParam("folder_id")
+		if folderIDStr != "all" {
+			filterFolder = true
+			if folderIDStr != "" && folderIDStr != "null" && folderIDStr != "root" {
+				folderID = &folderIDStr
+			}
+		}
 	}
 
 	search := c.QueryParam("q")
@@ -237,14 +244,15 @@ func (h *FileHandler) List(c echo.Context) error {
 	}
 
 	params := repository.ListFilesParams{
-		UserID:     userID,
-		FolderID:   folderID,
-		Search:     search,
-		SortBy:     sortBy,
-		SortDir:    sortDir,
-		Limit:      limit,
-		Cursor:     cursor,
-		IsPublic:   isPublic,
+		UserID:       userID,
+		FilterFolder: filterFolder,
+		FolderID:     folderID,
+		Search:       search,
+		SortBy:       sortBy,
+		SortDir:      sortDir,
+		Limit:        limit,
+		Cursor:       cursor,
+		IsPublic:     isPublic,
 	}
 
 	files, nextCursor, err := h.service.ListUserFiles(c.Request().Context(), params)
@@ -300,6 +308,26 @@ func (h *FileHandler) Move(c echo.Context) error {
 	}
 
 	return SendSuccess(c, http.StatusOK, map[string]string{"message": "File moved successfully"}, nil)
+}
+
+// PUT /api/v1/files/:id/rename
+func (h *FileHandler) Rename(c echo.Context) error {
+	fileID := c.Param("id")
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		Filename string `json:"filename"`
+	}
+	if err := c.Bind(&req); err != nil || req.Filename == "" {
+		return SendError(c, http.StatusBadRequest, "Invalid filename")
+	}
+
+	err := h.service.RenameFile(c.Request().Context(), fileID, userID, req.Filename)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{"message": "File renamed successfully"}, nil)
 }
 
 func (h *FileHandler) Delete(c echo.Context) error {

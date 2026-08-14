@@ -114,8 +114,12 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 	case contentType == "application/pdf" || ext == ".pdf":
 		thumbnailBytes, err = w.processPDF(ctx, file)
 	default:
-		// Documents, spreadsheets, text files — generate branded poster
-		thumbnailBytes = generateDocumentPoster(ext)
+		// // Documents, spreadsheets, text files — generate branded poster
+		// thumbnailBytes = generateDocumentPoster(ext)
+
+		// Non-visual files (code, JSON, data, archives, audio) use high-fidelity vector icons on the frontend
+		thumbnailBytes = nil
+		err = nil
 	}
 
 	if err == nil && len(thumbnailBytes) > 0 {

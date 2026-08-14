@@ -30,6 +30,7 @@ func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, auth
 		filesGroup.GET("/:id/download", fh.Download)
 		filesGroup.PATCH("/:id/share", fh.ToggleShare)
 		filesGroup.PUT("/:id/move", fh.Move)
+		filesGroup.PUT("/:id/rename", fh.Rename)
 		filesGroup.DELETE("/:id", fh.Delete)
 		filesGroup.GET("/:id", fh.GetDetails)
 		filesGroup.GET("/:id/thumbnail", fh.GetThumbnail)

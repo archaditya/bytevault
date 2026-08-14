@@ -24,17 +24,24 @@ const (
 	MaxFileSizeLimit = 100 * 1024 * 1024
 )
 
-// Whitelisted allowed MIME types for storage (includes iOS HEIC/HEIF formats)
+// Whitelisted allowed MIME types for storage (all developer, media, document, apple, and data formats)
 var AllowedMimeTypes = map[string]bool{
-	"image/jpeg":                                                                true,
-	"image/png":                                                                 true,
-	"image/gif":                                                                 true,
-	"image/webp":                                                                true,
-	"image/svg+xml":                                                             true,
-	"image/heic":                                                                true,
-	"image/heif":                                                                true,
-	"image/heic-sequence":                                                       true,
-	"image/heif-sequence":                                                       true,
+	// Images & Apple Formats
+	"image/jpeg":          true,
+	"image/png":           true,
+	"image/gif":           true,
+	"image/webp":          true,
+	"image/svg+xml":       true,
+	"image/heic":          true,
+	"image/heif":          true,
+	"image/heic-sequence": true,
+	"image/heif-sequence": true,
+	"image/avif":          true,
+	"image/bmp":           true,
+	"image/tiff":          true,
+	"image/x-icon":        true,
+
+	// Documents & Office
 	"application/pdf":                                                           true,
 	"application/msword":                                                        true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
@@ -42,20 +49,94 @@ var AllowedMimeTypes = map[string]bool{
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
 	"application/vnd.ms-powerpoint":                                            true,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-	"text/plain":                   true,
-	"text/csv":                     true,
-	"text/markdown":                true,
-	"audio/mpeg":                   true,
-	"audio/wav":                    true,
-	"audio/ogg":                    true,
-	"video/mp4":                    true,
-	"video/mpeg":                   true,
-	"video/quicktime":              true,
-	"video/webm":                   true,
-	"application/zip":              true,
-	"application/x-tar":            true,
-	"application/x-rar-compressed": true,
-	"application/x-7z-compressed":  true,
+	"application/rtf":                                                           true,
+	"application/epub+zip":                                                      true,
+
+	// Apple & macOS Formats
+	"application/x-iwork-pages-sffpages":     true,
+	"application/x-iwork-numbers-sffnumbers": true,
+	"application/x-iwork-keynote-sffkey":     true,
+	"application/vnd.apple.pages":            true,
+	"application/vnd.apple.numbers":          true,
+	"application/vnd.apple.keynote":          true,
+	"application/x-apple-diskimage":          true,
+	"application/x-plist":                    true,
+
+	// Developer, Code & Data formats
+	"application/json":          true,
+	"application/ld+json":       true,
+	"application/x-ndjson":      true,
+	"application/javascript":    true,
+	"text/javascript":           true,
+	"application/x-javascript":  true,
+	"application/typescript":    true,
+	"text/typescript":           true,
+	"text/plain":                true,
+	"text/csv":                  true,
+	"text/markdown":             true,
+	"text/html":                 true,
+	"text/css":                  true,
+	"text/xml":                  true,
+	"application/xml":           true,
+	"application/xhtml+xml":     true,
+	"text/yaml":                 true,
+	"text/x-yaml":               true,
+	"application/yaml":          true,
+	"application/x-yaml":        true,
+	"text/x-python":             true,
+	"application/x-python-code": true,
+	"text/x-go":                 true,
+	"text/x-c":                  true,
+	"text/x-c++":                true,
+	"text/x-java-source":        true,
+	"text/x-rust":               true,
+	"text/x-ruby":               true,
+	"text/x-php":                true,
+	"text/x-shellscript":        true,
+	"text/x-sh":                 true,
+	"text/x-sql":                true,
+	"application/sql":           true,
+	"application/x-sql":         true,
+	"application/wasm":          true,
+	"application/graphql":       true,
+	"application/x-protobuf":    true,
+	"application/toml":          true,
+	"text/x-toml":               true,
+
+	// Audio formats
+	"audio/mpeg":   true,
+	"audio/wav":    true,
+	"audio/ogg":    true,
+	"audio/x-m4a":  true,
+	"audio/mp4":    true,
+	"audio/aac":    true,
+	"audio/flac":   true,
+	"audio/aiff":   true,
+	"audio/x-aiff": true,
+	"audio/webm":   true,
+
+	// Video formats
+	"video/mp4":        true,
+	"video/mpeg":       true,
+	"video/quicktime":  true,
+	"video/webm":       true,
+	"video/x-m4v":      true,
+	"video/x-matroska": true,
+
+	// Archives & Datasets
+	"application/zip":                true,
+	"application/x-tar":              true,
+	"application/x-rar-compressed":   true,
+	"application/x-7z-compressed":    true,
+	"application/gzip":               true,
+	"application/x-gzip":             true,
+	"application/x-bzip2":            true,
+	"application/x-xz":               true,
+	"application/vnd.apache.parquet": true,
+	"application/x-parquet":          true,
+	"application/x-sqlite3":          true,
+	"application/vnd.sqlite3":        true,
+	"application/octet-stream":       true,
 }
 
 type FileService struct {
@@ -441,6 +522,28 @@ func (s *FileService) MoveFile(ctx context.Context, fileID, userID string, folde
 	return s.repo.MoveFile(ctx, fileID, folderID)
 }
 
+func (s *FileService) RenameFile(ctx context.Context, fileID, userID, newFilename string) error {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if file == nil || file.UserID != userID {
+		return fmt.Errorf("file not found or unauthorized")
+	}
+
+	newFilename = strings.TrimSpace(newFilename)
+	if newFilename == "" {
+		return fmt.Errorf("filename cannot be empty")
+	}
+
+	s.logActivity(ctx, userID, "file.rename", "file", file.ID, map[string]any{
+		"old_filename": file.Filename,
+		"new_filename": newFilename,
+	})
+
+	return s.repo.RenameFile(ctx, fileID, newFilename)
+}
+
 func (s *FileService) Delete(ctx context.Context, fileID, userID string) error {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
@@ -703,17 +806,13 @@ func ValidateMagicBytes(detectedType, declaredType, fileName string) error {
 		}
 	}
 
-	isOfficeDoc := (declaredType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-		declaredType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-		declaredType == "application/vnd.openxmlformats-officedocument.presentationml.presentation")
-
-	actualAllowedType := detectedType
-	if detectedType == "application/zip" && isOfficeDoc {
-		actualAllowedType = declaredType
+	// Block only dangerous executable payloads
+	blockedExts := map[string]bool{
+		".exe": true, ".bat": true, ".cmd": true, ".com": true,
+		".msi": true, ".scr": true, ".pif": true, ".vbs": true, ".wsf": true,
 	}
-
-	if !AllowedMimeTypes[actualAllowedType] && detectedType != "application/octet-stream" {
-		return fmt.Errorf("detected MIME type %s is not permitted in ByteVault", detectedType)
+	if blockedExts[ext] {
+		return fmt.Errorf("executable file type %s is not permitted in ByteVault", ext)
 	}
 
 	if !areTypesCompatible(detectedType, declaredType, ext) {
@@ -728,39 +827,55 @@ func areTypesCompatible(detected, declared, ext string) bool {
 		return true
 	}
 
-	if (ext == ".heic" || ext == ".heif") && (declared == "image/heic" || declared == "image/heif") {
+	// Apple HEIC / HEIF / Live Photo
+	if (ext == ".heic" || ext == ".heif") && (declared == "image/heic" || declared == "image/heif" || detected == "image/heic" || detected == "image/heif") {
 		return true
 	}
 
+	// Zip containers (DOCX, XLSX, PPTX, Pages, Numbers, Keynote, EPUB, JAR, etc.)
 	if detected == "application/zip" {
-		if declared == "application/zip" {
-			return true
+		zipExts := map[string]bool{
+			".docx": true, ".xlsx": true, ".pptx": true,
+			".doc": true, ".xls": true, ".ppt": true,
+			".pages": true, ".numbers": true, ".key": true, ".keynote": true,
+			".epub": true, ".jar": true, ".apk": true, ".zip": true,
 		}
-		if ext == ".docx" || ext == ".xlsx" || ext == ".pptx" || ext == ".doc" || ext == ".xls" || ext == ".ppt" {
+		if zipExts[ext] || strings.Contains(declared, "zip") || strings.Contains(declared, "officedocument") || strings.Contains(declared, "iwork") || strings.Contains(declared, "apple") {
 			return true
 		}
 	}
 
-	if strings.HasPrefix(detected, "text/") && strings.HasPrefix(declared, "text/") {
-		return true
-	}
-	if detected == "text/plain" && (declared == "text/markdown" || declared == "text/csv") {
+	// Text / Code / JSON / YAML / XML / Script / Developer files (http.DetectContentType sniffs text files as text/plain, text/html, or text/xml)
+	isTextDetected := strings.HasPrefix(detected, "text/") || detected == "text/plain" || detected == "application/octet-stream"
+	isTextOrCodeDeclared := strings.HasPrefix(declared, "text/") ||
+		strings.Contains(declared, "json") ||
+		strings.Contains(declared, "javascript") ||
+		strings.Contains(declared, "typescript") ||
+		strings.Contains(declared, "yaml") ||
+		strings.Contains(declared, "xml") ||
+		strings.Contains(declared, "sql") ||
+		strings.Contains(declared, "graphql") ||
+		strings.Contains(declared, "wasm") ||
+		strings.Contains(declared, "toml") ||
+		strings.Contains(declared, "protobuf")
+
+	if isTextDetected && isTextOrCodeDeclared {
 		return true
 	}
 
-	if detected == "application/octet-stream" {
+	// Generic binary / octet-stream / data / media
+	if detected == "application/octet-stream" || declared == "application/octet-stream" {
 		blockedExts := map[string]bool{
-			".exe": true,
-			".bat": true,
-			".sh":  true,
-			".dll": true,
-			".com": true,
-			".cmd": true,
-			".msi": true,
-			".scr": true,
+			".exe": true, ".bat": true, ".cmd": true, ".com": true,
+			".msi": true, ".scr": true, ".pif": true, ".vbs": true, ".wsf": true,
 		}
-
 		return !blockedExts[ext]
+	}
+
+	// Audio & Video container variations
+	if (strings.HasPrefix(detected, "audio/") || strings.HasPrefix(detected, "video/")) &&
+		(strings.HasPrefix(declared, "audio/") || strings.HasPrefix(declared, "video/")) {
+		return true
 	}
 
 	return false
