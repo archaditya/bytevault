@@ -71,12 +71,12 @@ func (b *BrevoClient) SendOTP(ctx context.Context, toEmail, toName, otp string) 
 	var buf bytes.Buffer
 	emailTmpl.Execute(&buf, EmailData{
 		Heading:  "Verify your email",
-		Message:  fmt.Sprintf("Hi %s, use this code to verify your ByteVault account:", toName),
+		Message:  fmt.Sprintf("Hi %s, use this code to verify your PushPort account:", toName),
 		OTP:      otp,
 		OTPColor: "#a78bfa",
 		Footer:   "This code expires in 10 minutes. If you didn't request this, ignore this email.",
 	})
-	return b.send(ctx, toEmail, toName, "ByteVault — Verify your email", buf.String())
+	return b.send(ctx, toEmail, toName, "PushPort — Verify your email", buf.String())
 }
 
 
@@ -85,12 +85,12 @@ func (b *BrevoClient) SendPasswordReset(ctx context.Context, toEmail, toName, ot
 	var buf bytes.Buffer
 	emailTmpl.Execute(&buf, EmailData{
 		Heading:  "Reset your password",
-		Message:  fmt.Sprintf("Hi %s, use this code to reset your ByteVault password:", toName),
+		Message:  fmt.Sprintf("Hi %s, use this code to reset your PushPort password:", toName),
 		OTP:      otp,
 		OTPColor: "#fbbf24",
 		Footer:   "This code expires in 10 minutes. If you didn't request this, ignore this email.",
 	})
-	return b.send(ctx, toEmail, toName, "ByteVault — Reset your password", buf.String())
+	return b.send(ctx, toEmail, toName, "PushPort — Reset your password", buf.String())
 }
 
 // SendGeneric sends a general notification email.

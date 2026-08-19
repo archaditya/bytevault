@@ -70,7 +70,7 @@ func VerifyTOTPCode(secret, code string) bool {
 
 // GenerateQRCodeURI returns the otpauth:// URI for authenticator apps (Google Authenticator, Authy)
 func GenerateQRCodeURI(secret, userEmail string) string {
-	issuer := "ByteVault"
+	issuer := "PushPort"
 	label := fmt.Sprintf("%s:%s", issuer, userEmail)
 	return fmt.Sprintf("otpauth://totp/%s?secret=%s&issuer=%s&period=30&digits=6",
 		url.PathEscape(label),

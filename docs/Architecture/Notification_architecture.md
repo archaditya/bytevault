@@ -1,6 +1,6 @@
-# ByteVault Notification & Verification Engine Architecture
+# PushPort Notification & Verification Engine Architecture
 
-This document outlines the complete design, data structures, asynchronous processing queue, worker pools, and routing wiring for the ByteVault notification engine.
+This document outlines the complete design, data structures, asynchronous processing queue, worker pools, and routing wiring for the PushPort notification engine.
 
 ---
 
@@ -216,7 +216,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/archaditya/bytevault/internal/model"
+	"github.com/archaditya/PushPort/internal/model"
 )
 
 var ErrVerificationNotFound = errors.New("verification record not found")
@@ -306,8 +306,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/archaditya/bytevault/internal/config"
-	"github.com/archaditya/bytevault/internal/logger"
+	"github.com/archaditya/PushPort/internal/config"
+	"github.com/archaditya/PushPort/internal/logger"
 )
 
 const (
@@ -315,11 +315,11 @@ const (
 	JobTypePush  = "push"
 	JobTypeInApp = "in_app"
 
-	QueueEmail = "bytevault:queue:email"
-	QueuePush  = "bytevault:queue:push"
-	QueueInApp = "bytevault:queue:in_app"
+	QueueEmail = "PushPort:queue:email"
+	QueuePush  = "PushPort:queue:push"
+	QueueInApp = "PushPort:queue:in_app"
 
-	ChannelNotifications = "bytevault:notifications"
+	ChannelNotifications = "PushPort:notifications"
 )
 
 type Job struct {
@@ -407,12 +407,12 @@ import (
 	"firebase.google.com/go/v4/messaging"
 	"google.golang.org/api/option"
 
-	"github.com/archaditya/bytevault/internal/config"
-	"github.com/archaditya/bytevault/internal/logger"
-	"github.com/archaditya/bytevault/internal/model"
-	"github.com/archaditya/bytevault/internal/notification/email"
-	"github.com/archaditya/bytevault/internal/notification/queue"
-	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/PushPort/internal/config"
+	"github.com/archaditya/PushPort/internal/logger"
+	"github.com/archaditya/PushPort/internal/model"
+	"github.com/archaditya/PushPort/internal/notification/email"
+	"github.com/archaditya/PushPort/internal/notification/queue"
+	"github.com/archaditya/PushPort/internal/repository"
 )
 
 type WorkerPool struct {
@@ -524,8 +524,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/archaditya/bytevault/internal/logger"
-	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/PushPort/internal/logger"
+	"github.com/archaditya/PushPort/internal/repository"
 )
 
 type Scheduler struct {
@@ -627,13 +627,13 @@ redis-server
 
 #### 2. Start Backend API
 ```powershell
-cd b:\Personal-Projects\ByteVault\backend
+cd b:\Personal-Projects\PushPort\backend
 go run cmd/api/main.go
 ```
 *(Always run `cmd/api/main.go` instead of `cmd/server/main.go` to avoid path specification errors).*
 
 #### 3. Start Frontend Dev Client
 ```powershell
-cd b:\Personal-Projects\ByteVault\frontend
+cd b:\Personal-Projects\PushPort\frontend
 npm run dev
 ```

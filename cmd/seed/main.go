@@ -37,7 +37,7 @@ func main() {
 	}
 
 	// 2. Define admin user credentials
-	adminEmail := "admin@bytevault.com"
+	adminEmail := "admin@pushport.com"
 	adminPassword := "AdminPassword123!" // Feel free to customize this default password
 	adminFirstName := "System"
 	adminLastName := "Admin"

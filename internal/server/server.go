@@ -72,7 +72,7 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://localhost:8080",
-		"https://bytevault.archadi.dev",
+		"https://pushport.archadi.dev",
 	}
 	if cfg.Server.AllowedOrigins != "" {
 		for _, o := range strings.Split(cfg.Server.AllowedOrigins, ",") {
@@ -107,7 +107,7 @@ func (s *Server) Start() error {
 		port = "8080"
 	}
 
-	logger.Log.Info().Str("port", port).Str("env", s.config.App.Env).Msg("🚀 ByteVault server starting")
+	logger.Log.Info().Str("port", port).Str("env", s.config.App.Env).Msg("🚀 PushPort server starting")
 
 	return s.echo.Start(":" + port)
 }

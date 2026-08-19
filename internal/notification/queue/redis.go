@@ -37,14 +37,14 @@ const (
 
 // Queue names.
 const (
-	QueueEmail = "bytevault:queue:email"
-	QueuePush  = "bytevault:queue:push"
-	QueueInApp = "bytevault:queue:in_app"
-	QueueMediaProcessing = "bytevault:queue:media_processing"
+	QueueEmail = "PushPort:queue:email"
+	QueuePush  = "PushPort:queue:push"
+	QueueInApp = "PushPort:queue:in_app"
+	QueueMediaProcessing = "PushPort:queue:media_processing"
 )
 
 // PubSub channel for real-time fan-out.
-const ChannelNotifications = "bytevault:notifications"
+const ChannelNotifications = "PushPort:notifications"
 
 // Job is a single unit of work pushed to a Redis queue.
 type Job struct {
@@ -216,9 +216,9 @@ func (q *RedisQueue) Close() error {
 }
 
 
-// StoreOTP saves an OTP code in Redis with a TTL. Key format: bytevault:otp:{email}:{purpose}
+// StoreOTP saves an OTP code in Redis with a TTL. Key format: PushPort:otp:{email}:{purpose}
 func (q *RedisQueue) StoreOTP(ctx context.Context, email, purpose, otp string, ttl time.Duration) error {
-	key := fmt.Sprintf("bytevault:otp:%s:%s", email, purpose)
+	key := fmt.Sprintf("PushPort:otp:%s:%s", email, purpose)
 	data, _ := json.Marshal(map[string]any{
 		"otp":      otp,
 		"attempts": 0,
@@ -228,7 +228,7 @@ func (q *RedisQueue) StoreOTP(ctx context.Context, email, purpose, otp string, t
 
 // VerifyOTP checks the OTP from Redis. Returns nil on success, error otherwise.
 func (q *RedisQueue) VerifyOTP(ctx context.Context, email, purpose, otp string, maxAttempts int) error {
-	key := fmt.Sprintf("bytevault:otp:%s:%s", email, purpose)
+	key := fmt.Sprintf("PushPort:otp:%s:%s", email, purpose)
 	val, err := q.client.Get(ctx, key).Result()
 	if err != nil {
 		return fmt.Errorf("OTP not found or expired")
@@ -261,7 +261,7 @@ func (q *RedisQueue) VerifyOTP(ctx context.Context, email, purpose, otp string, 
 
 // DeleteOTP removes an OTP key (e.g. after successful verification).
 func (q *RedisQueue) DeleteOTP(ctx context.Context, email, purpose string) {
-	key := fmt.Sprintf("bytevault:otp:%s:%s", email, purpose)
+	key := fmt.Sprintf("PushPort:otp:%s:%s", email, purpose)
 	q.client.Del(ctx, key)
 }
 

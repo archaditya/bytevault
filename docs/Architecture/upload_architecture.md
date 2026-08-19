@@ -1,6 +1,6 @@
-# ByteVault Multipart Upload Architecture Walkthrough
+# PushPort Multipart Upload Architecture Walkthrough
 
-ByteVault uploads large files securely, efficiently, and with real-time feedback using a three-phase multipart upload pattern.
+PushPort uploads large files securely, efficiently, and with real-time feedback using a three-phase multipart upload pattern.
 
 ---
 

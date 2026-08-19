@@ -1,12 +1,12 @@
-# ByteVault User Authentication & Session Engine Architecture
+# PushPort User Authentication & Session Engine Architecture
 
-This document describes the design, database schemas, sequence flows, Role-Based Access Control (RBAC) model, and avatar management systems powering the User Authentication & Session Engine of ByteVault.
+This document describes the design, database schemas, sequence flows, Role-Based Access Control (RBAC) model, and avatar management systems powering the User Authentication & Session Engine of PushPort.
 
 ---
 
 ## 1. System Design Overview
 
-ByteVault implements a stateless, token-based authentication mechanism using JSON Web Tokens (JWT) for access validation and database-backed session tracking for refresh tokens. 
+PushPort implements a stateless, token-based authentication mechanism using JSON Web Tokens (JWT) for access validation and database-backed session tracking for refresh tokens. 
 
 ```mermaid
 flowchart TD
@@ -107,7 +107,7 @@ sequenceDiagram
 
 ### Flow C: JWT Refresh Token Rotation (RTR)
 
-ByteVault implements Refresh Token Rotation. When a client requests a new access token, the current refresh token is revoked and replaced with a new one.
+PushPort implements Refresh Token Rotation. When a client requests a new access token, the current refresh token is revoked and replaced with a new one.
 
 ```mermaid
 sequenceDiagram
@@ -215,7 +215,7 @@ Access tokens are signed using HMAC-SHA256 and store authorization attributes to
 
 Cloudflare R2/S3 buckets containing private assets like user data cannot serve files directly over standard public links. In addition, the maximum expiration window for AWS Signature Version 4 presigned URLs is strictly limited to 7 days, meaning stored static links eventually expire and break client-side image tags.
 
-ByteVault handles this by keeping R2 buckets private and dynamic via a backend streaming proxy:
+PushPort handles this by keeping R2 buckets private and dynamic via a backend streaming proxy:
 
 ```mermaid
 sequenceDiagram

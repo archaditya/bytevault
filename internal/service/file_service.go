@@ -812,7 +812,7 @@ func ValidateMagicBytes(detectedType, declaredType, fileName string) error {
 		".msi": true, ".scr": true, ".pif": true, ".vbs": true, ".wsf": true,
 	}
 	if blockedExts[ext] {
-		return fmt.Errorf("executable file type %s is not permitted in ByteVault", ext)
+		return fmt.Errorf("executable file type %s is not permitted in PushPort", ext)
 	}
 
 	if !areTypesCompatible(detectedType, declaredType, ext) {

@@ -10,7 +10,7 @@
 
 With Docker secured, the next step was hardening the public entry point of the application.
 
-Since every external request reaches ByteVault through Nginx, it became the first security boundary.
+Since every external request reaches PushPort through Nginx, it became the first security boundary.
 
 ---
 
@@ -68,7 +68,7 @@ Configured:
 client_max_body_size 5G;
 ```
 
-Preparing ByteVault for future large file uploads.
+Preparing PushPort for future large file uploads.
 
 ---
 

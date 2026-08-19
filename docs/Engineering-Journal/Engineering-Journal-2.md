@@ -6,7 +6,7 @@ Setting Up My First Production VPS (OVH Ubuntu 24.04)
 
 ## Goal
 
-The goal was not just to rent a VPS, but to prepare a fresh Linux server so it can safely host ByteVault in the future.
+The goal was not just to rent a VPS, but to prepare a fresh Linux server so it can safely host PushPort in the future.
 
 This was also my first time working with a remote Linux server instead of my local machine.
 
@@ -435,7 +435,7 @@ docker ps
 
 **What's Next**
 
-- Clone ByteVault repository
+- Clone PushPort repository
 - Configure Git authentication
 - Install Docker Compose
 - Deploy PostgreSQL and Backend using Docker Compose
