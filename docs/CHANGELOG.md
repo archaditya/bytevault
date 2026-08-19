@@ -1,6 +1,6 @@
-# ByteVault Changelog
+# PushPort Changelog
 
-All notable changes to ByteVault will be documented here.
+All notable changes to PushPort will be documented here.
 
 The format is inspired by Keep a Changelog.
 

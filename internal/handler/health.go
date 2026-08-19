@@ -23,6 +23,6 @@ func NewHealthHandler() *HealthHandler {
 func (h *HealthHandler) Health(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"status": "healthy",
-		"service": "Bytevault",
+		"service": "PushPort",
 	})
 }

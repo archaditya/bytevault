@@ -1,6 +1,6 @@
 # Engineering Journal #3
 
-# Deploying ByteVault V1 to Production
+# Deploying PushPort V1 to Production
 
 Date: July 2026
 
@@ -8,7 +8,7 @@ Date: July 2026
 
 ## Objective
 
-Deploy ByteVault on a real production server instead of running it only on localhost.
+Deploy PushPort on a real production server instead of running it only on localhost.
 
 ---
 
@@ -100,7 +100,7 @@ sudo usermod -aG docker ubuntu
 
 Installed Git.
 
-Cloned ByteVault repository.
+Cloned PushPort repository.
 
 ```
 
@@ -231,8 +231,8 @@ Configured Cloudflare DNS.
 
 Created subdomains:
 
-- bytevault.archadi.dev
-- api-bytevault.archadi.dev
+- PushPort.archadi.dev
+- api-PushPort.archadi.dev
 
 Learned about:
 
@@ -272,7 +272,7 @@ Frontend now communicates securely with:
 
 ```
 
-https://api.bytevault.archadi.dev
+https://api.PushPort.archadi.dev
 
 ```
 
@@ -341,8 +341,8 @@ Every issue improved my understanding of production systems.
 
 # Outcome
 
-ByteVault V1 is now publicly deployed.
+PushPort V1 is now publicly deployed.
 
 This is my first self-hosted production backend running on my own VPS with Docker, Nginx, HTTPS, PostgreSQL, and Cloudflare.
 
-The next milestone is ByteVault V2.
+The next milestone is PushPort V2.

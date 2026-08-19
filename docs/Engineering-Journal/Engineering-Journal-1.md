@@ -1,12 +1,12 @@
 # Engineering Journal #1
 
-# Building ByteVault Backend from Scratch
+# Building PushPort Backend from Scratch
 
 **Duration:** June – July 2026
 
 ---
 
-## Why I Started ByteVault
+## Why I Started PushPort
 
 While learning backend development, I noticed that most file upload tutorials stop after storing a file locally or uploading it to cloud storage.
 
@@ -14,7 +14,7 @@ I wanted to build something closer to a real production system.
 
 Instead of creating another CRUD project, I decided to build a file transfer platform that focuses on authentication, resumable uploads, cloud storage integration, permissions, and production deployment.
 
-That project became **ByteVault**.
+That project became **PushPort**.
 
 ---
 
@@ -432,7 +432,7 @@ That complete flow finally makes sense to me.
 
 # What's Next
 
-ByteVault V1 is now deployed on a production VPS.
+PushPort V1 is now deployed on a production VPS.
 
 The next version will focus on:
 
@@ -444,6 +444,6 @@ The next version will focus on:
 - Better UX
 - Performance Improvements
 
-ByteVault started as a learning project.
+PushPort started as a learning project.
 
 My goal is to slowly evolve it into a real SaaS product.

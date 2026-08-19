@@ -98,7 +98,7 @@ Now I can clone, pull, and push repositories from the VPS securely without using
 
 ## What's Next
 
-- Clone the ByteVault repository on the VPS.
+- Clone the PushPort repository on the VPS.
 - Install Docker Compose.
-- Deploy ByteVault using Docker Compose.
+- Deploy PushPort using Docker Compose.
 - Expose the application with Nginx and connect my domain.
