@@ -11,6 +11,7 @@ import (
 	"github.com/archaditya/bytevault/internal/storage/local"
 	"github.com/archaditya/bytevault/internal/storage/r2"
 
+	"github.com/archaditya/bytevault/internal/ai"
 	"github.com/archaditya/bytevault/internal/notification/email"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/notification/scheduler"
@@ -119,8 +120,9 @@ func (s *Server) registerRoutes() {
 			wp.Start()
 		}
 
-		// Start 2 concurrent Media Processing Workers (Images, Videos, PDFs)
-		mediaWorker := worker.NewMediaWorker(fileRepo, store, redisQueue)
+		// Start 2 concurrent Media Processing Workers (Images, Videos, PDFs + AI Image Labeling)
+		imageLabeler := ai.NewImageLabeler(s.config.AI)
+		mediaWorker := worker.NewMediaWorker(fileRepo, store, redisQueue, imageLabeler)
 		mediaWorker.Start(2)
 	}
 
