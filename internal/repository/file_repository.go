@@ -32,6 +32,27 @@ func NewFileRepository(db *pgxpool.Pool) *FileRepository {
 	return &FileRepository{db: db}
 }
 
+// buildPrefixTsQuery converts words into prefix tsquery format: "mon" -> "mon:*" or "home th" -> "home:* & th:*"
+func buildPrefixTsQuery(search string) string {
+	words := strings.Fields(strings.TrimSpace(search))
+	var parts []string
+	for _, w := range words {
+		cleaned := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return -1
+		}, w)
+		if cleaned != "" {
+			parts = append(parts, cleaned+":*")
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " & ")
+}
+
 func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 	query := `
 		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, tags, created_at, updated_at)
@@ -108,13 +129,25 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	if params.IsPublic != nil && *params.IsPublic {
 		conditions = append(conditions, "is_public = true")
 	} else if params.Search != "" {
-		// Full-text search: use tsvector index with ILIKE fallback for files without extracted content
-		conditions = append(conditions, fmt.Sprintf(
-			"(search_vector @@ plainto_tsquery('english', $%d) OR filename ILIKE $%d)",
-			argIndex, argIndex+1,
-		))
-		args = append(args, params.Search, "%"+params.Search+"%")
-		argIndex += 2
+		trimmed := strings.TrimSpace(params.Search)
+		prefixQuery := buildPrefixTsQuery(trimmed)
+		likePattern := "%" + trimmed + "%"
+
+		if prefixQuery != "" {
+			conditions = append(conditions, fmt.Sprintf(
+				"(search_vector @@ to_tsquery('english', $%d) OR search_vector @@ plainto_tsquery('english', $%d) OR filename ILIKE $%d OR array_to_string(tags, ' ') ILIKE $%d OR content_text ILIKE $%d)",
+				argIndex, argIndex+1, argIndex+2, argIndex+2, argIndex+2,
+			))
+			args = append(args, prefixQuery, trimmed, likePattern)
+			argIndex += 3
+		} else {
+			conditions = append(conditions, fmt.Sprintf(
+				"(filename ILIKE $%d OR array_to_string(tags, ' ') ILIKE $%d OR content_text ILIKE $%d)",
+				argIndex, argIndex, argIndex,
+			))
+			args = append(args, likePattern)
+			argIndex++
+		}
 	} else if params.FilterFolder {
 		if params.FolderID != nil && *params.FolderID != "" {
 			conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIndex))
@@ -278,12 +311,25 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	conditions = append(conditions, "status = 'READY'")
 
 	if search != "" {
-		conditions = append(conditions, fmt.Sprintf(
-			"(search_vector @@ plainto_tsquery('english', $%d) OR filename ILIKE $%d)",
-			argIndex, argIndex+1,
-		))
-		args = append(args, search, "%"+search+"%")
-		argIndex += 2
+		trimmed := strings.TrimSpace(search)
+		prefixQuery := buildPrefixTsQuery(trimmed)
+		likePattern := "%" + trimmed + "%"
+
+		if prefixQuery != "" {
+			conditions = append(conditions, fmt.Sprintf(
+				"(search_vector @@ to_tsquery('english', $%d) OR search_vector @@ plainto_tsquery('english', $%d) OR filename ILIKE $%d OR array_to_string(tags, ' ') ILIKE $%d OR content_text ILIKE $%d)",
+				argIndex, argIndex+1, argIndex+2, argIndex+2, argIndex+2,
+			))
+			args = append(args, prefixQuery, trimmed, likePattern)
+			argIndex += 3
+		} else {
+			conditions = append(conditions, fmt.Sprintf(
+				"(filename ILIKE $%d OR array_to_string(tags, ' ') ILIKE $%d OR content_text ILIKE $%d)",
+				argIndex, argIndex, argIndex,
+			))
+			args = append(args, likePattern)
+			argIndex++
+		}
 	}
 
 	if cursor != "" {
@@ -350,12 +396,25 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	conditions = append(conditions, "f.is_public = true")
 
 	if search != "" {
-		conditions = append(conditions, fmt.Sprintf(
-			"(f.search_vector @@ plainto_tsquery('english', $%d) OR f.filename ILIKE $%d)",
-			argIndex, argIndex+1,
-		))
-		args = append(args, search, "%"+search+"%")
-		argIndex += 2
+		trimmed := strings.TrimSpace(search)
+		prefixQuery := buildPrefixTsQuery(trimmed)
+		likePattern := "%" + trimmed + "%"
+
+		if prefixQuery != "" {
+			conditions = append(conditions, fmt.Sprintf(
+				"(f.search_vector @@ to_tsquery('english', $%d) OR f.search_vector @@ plainto_tsquery('english', $%d) OR f.filename ILIKE $%d OR array_to_string(f.tags, ' ') ILIKE $%d OR f.content_text ILIKE $%d)",
+				argIndex, argIndex+1, argIndex+2, argIndex+2, argIndex+2,
+			))
+			args = append(args, prefixQuery, trimmed, likePattern)
+			argIndex += 3
+		} else {
+			conditions = append(conditions, fmt.Sprintf(
+				"(f.filename ILIKE $%d OR array_to_string(f.tags, ' ') ILIKE $%d OR f.content_text ILIKE $%d)",
+				argIndex, argIndex, argIndex,
+			))
+			args = append(args, likePattern)
+			argIndex++
+		}
 	}
 
 	if cursor != "" {
