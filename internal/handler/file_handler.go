@@ -32,17 +32,18 @@ func (h *FileHandler) CreateUploadSession(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	var req struct {
-		Filename    string  `json:"filename"`
-		FileSize    int64   `json:"file_size"`
-		ContentType string  `json:"content_type"`
-		FolderID    *string `json:"folder_id,omitempty"`
+		Filename    string   `json:"filename"`
+		FileSize    int64    `json:"file_size"`
+		ContentType string   `json:"content_type"`
+		FolderID    *string  `json:"folder_id,omitempty"`
+		Tags        []string `json:"tags,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" {
 		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
 	}
 
-	fileMeta, uploadURL, err := h.service.CreateUploadSession(c.Request().Context(), userID, req.Filename, req.FileSize, req.ContentType, req.FolderID)
+	fileMeta, uploadURL, err := h.service.CreateUploadSession(c.Request().Context(), userID, req.Filename, req.FileSize, req.ContentType, req.FolderID, req.Tags)
 	if err != nil {
 		return SendError(c, http.StatusBadRequest, err.Error())
 	}

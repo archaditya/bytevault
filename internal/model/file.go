@@ -23,6 +23,12 @@ type File struct {
 	DeletedAt       *time.Time `json:"-"`
 	Downloads       int64      `json:"downloads"`
 
+	// Internal field for full-text search (populated by background text extraction worker)
+	ContentText     *string    `json:"-"`
+
+	// User-provided and AI-generated labels for search and categorization
+	Tags            []string   `json:"tags,omitempty"`
+
 	// Enriched fields for user/admin views
 	OwnerName       string     `json:"owner_name,omitempty"`
 	OwnerEmail      string     `json:"owner_email,omitempty"`

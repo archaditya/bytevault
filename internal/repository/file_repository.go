@@ -34,8 +34,8 @@ func NewFileRepository(db *pgxpool.Pool) *FileRepository {
 
 func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 	query := `
-		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, tags, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
 		RETURNING id, created_at, updated_at
 	`
 	err := r.db.QueryRow(ctx, query,
@@ -49,6 +49,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 		file.IsPublic,
 		file.Status,
 		file.FolderID,
+		file.Tags,
 	).Scan(&file.ID, &file.CreatedAt, &file.UpdatedAt)
 
 	if err != nil {
@@ -59,7 +60,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -80,6 +81,7 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 		&file.CreatedAt,
 		&file.UpdatedAt,
 		&file.Downloads,
+		&file.Tags,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -106,9 +108,13 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	if params.IsPublic != nil && *params.IsPublic {
 		conditions = append(conditions, "is_public = true")
 	} else if params.Search != "" {
-		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
-		args = append(args, "%"+params.Search+"%")
-		argIndex++
+		// Full-text search: use tsvector index with ILIKE fallback for files without extracted content
+		conditions = append(conditions, fmt.Sprintf(
+			"(search_vector @@ plainto_tsquery('english', $%d) OR filename ILIKE $%d)",
+			argIndex, argIndex+1,
+		))
+		args = append(args, params.Search, "%"+params.Search+"%")
+		argIndex += 2
 	} else if params.FilterFolder {
 		if params.FolderID != nil && *params.FolderID != "" {
 			conditions = append(conditions, fmt.Sprintf("folder_id = $%d", argIndex))
@@ -134,7 +140,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ")
 
@@ -186,6 +192,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 			&f.CreatedAt,
 			&f.UpdatedAt,
 			&f.Downloads,
+			&f.Tags,
 		)
 		if err != nil {
 			return nil, "", err
@@ -271,9 +278,12 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	conditions = append(conditions, "status = 'READY'")
 
 	if search != "" {
-		conditions = append(conditions, fmt.Sprintf("filename ILIKE $%d", argIndex))
-		args = append(args, "%"+search+"%")
-		argIndex++
+		conditions = append(conditions, fmt.Sprintf(
+			"(search_vector @@ plainto_tsquery('english', $%d) OR filename ILIKE $%d)",
+			argIndex, argIndex+1,
+		))
+		args = append(args, search, "%"+search+"%")
+		argIndex += 2
 	}
 
 	if cursor != "" {
@@ -285,11 +295,19 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 		}
 	}
 
+	// Use relevance ranking when searching, otherwise default chronological order
+	orderClause := "created_at DESC"
+	if search != "" {
+		orderClause = fmt.Sprintf(
+			"ts_rank(search_vector, plainto_tsquery('english', $1)) DESC, created_at DESC",
+		)
+	}
+
 	query := `
 		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ") + `
-		ORDER BY created_at DESC
+		ORDER BY ` + orderClause + `
 	`
 
 	limitVal := 20
@@ -332,9 +350,12 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	conditions = append(conditions, "f.is_public = true")
 
 	if search != "" {
-		conditions = append(conditions, fmt.Sprintf("f.filename ILIKE $%d", argIndex))
-		args = append(args, "%"+search+"%")
-		argIndex++
+		conditions = append(conditions, fmt.Sprintf(
+			"(f.search_vector @@ plainto_tsquery('english', $%d) OR f.filename ILIKE $%d)",
+			argIndex, argIndex+1,
+		))
+		args = append(args, search, "%"+search+"%")
+		argIndex += 2
 	}
 
 	if cursor != "" {
@@ -346,13 +367,21 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 		}
 	}
 
+	// Use relevance ranking when searching, otherwise default chronological order
+	orderClause := "f.created_at DESC"
+	if search != "" {
+		orderClause = fmt.Sprintf(
+			"ts_rank(f.search_vector, plainto_tsquery('english', $1)) DESC, f.created_at DESC",
+		)
+	}
+
 	query := `
 		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads,
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
 		FROM files f
 		LEFT JOIN users u ON f.user_id = u.id
 		WHERE ` + strings.Join(conditions, " AND ") + `
-		ORDER BY f.created_at DESC
+		ORDER BY ` + orderClause + `
 	`
 
 	limitVal := 20
@@ -420,6 +449,30 @@ func (r *FileRepository) IncrementDownloads(ctx context.Context, id string) erro
 func (r *FileRepository) UpdateThumbnailKey(ctx context.Context, id string, thumbnailKey string) error {
 	query := `UPDATE files SET thumbnail_key = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.Exec(ctx, query, thumbnailKey, id)
+	return err
+}
+
+// UpdateContentText stores extracted document text for full-text search indexing.
+// The DB trigger automatically regenerates the search_vector column from filename + content_text + tags.
+func (r *FileRepository) UpdateContentText(ctx context.Context, id string, text string) error {
+	query := `UPDATE files SET content_text = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, text, id)
+	return err
+}
+
+// AppendToContentText appends additional text (e.g., AI-generated labels) to existing content_text.
+// This preserves any previously extracted document text while adding new searchable content.
+func (r *FileRepository) AppendToContentText(ctx context.Context, id string, additionalText string) error {
+	query := `UPDATE files SET content_text = COALESCE(content_text, '') || E'\n' || $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, additionalText, id)
+	return err
+}
+
+// UpdateTags replaces the tags array for a file.
+// The DB trigger automatically regenerates the search_vector to include the new tags.
+func (r *FileRepository) UpdateTags(ctx context.Context, id string, tags []string) error {
+	query := `UPDATE files SET tags = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, tags, id)
 	return err
 }
 

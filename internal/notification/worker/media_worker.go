@@ -15,12 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/archaditya/bytevault/internal/ai"
 	"github.com/archaditya/bytevault/internal/logger"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/security"
 	"github.com/archaditya/bytevault/internal/storage"
+	"github.com/archaditya/bytevault/internal/textextract"
 )
 
 type MediaWorker struct {
@@ -28,15 +30,17 @@ type MediaWorker struct {
 	storage        storage.StorageProvider
 	queue          *queue.RedisQueue
 	malwareScanner security.MalwareScanner
+	labeler        *ai.ImageLabeler
 	stopChan       chan struct{}
 }
 
-func NewMediaWorker(fileRepo *repository.FileRepository, storage storage.StorageProvider, queue *queue.RedisQueue) *MediaWorker {
+func NewMediaWorker(fileRepo *repository.FileRepository, storage storage.StorageProvider, queue *queue.RedisQueue, labeler *ai.ImageLabeler) *MediaWorker {
 	return &MediaWorker{
 		fileRepo:       fileRepo,
 		storage:        storage,
 		queue:          queue,
 		malwareScanner: security.NewDefaultMalwareScanner(),
+		labeler:        labeler,
 		stopChan:       make(chan struct{}),
 	}
 }
@@ -133,6 +137,18 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 		}
 	}
 
+	// 2.5. Text Extraction Stage (for full-text search indexing)
+	// Downloads the file, extracts searchable text (PDF, DOCX, TXT, code files),
+	// and stores it in DB. The PostgreSQL trigger auto-generates the search_vector.
+	// This step is non-fatal: extraction failures are logged but don't block READY status.
+	w.extractAndIndexText(ctx, file)
+
+	// 2.6. AI Image Labeling Stage (Auto-labels objects/scenes in photos for search)
+	// Runs Google Cloud Vision API with Cloudflare Workers AI fallback.
+	// Labels are added to tags and content_text, triggering PostgreSQL FTS search_vector update.
+	// This step is non-fatal: errors/missing keys won't block READY status.
+	w.labelAndIndexImage(ctx, file, thumbnailBytes)
+
 	// 3. Mark File Status = 'READY' (Unlocks Access Gate for Users)
 	if err := w.fileRepo.UpdateStatus(ctx, file.ID, "READY"); err != nil {
 		return fmt.Errorf("failed to update status to READY: %w", err)
@@ -140,6 +156,133 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 
 	logger.Log.Info().Str("file_id", file.ID).Msg("✅ File passed security scan & thumbnailing -> Marked READY")
 	return nil
+}
+
+// labelAndIndexImage classifies image files using AI (Google Vision / Cloudflare Workers AI)
+// and stores the resulting labels in tags + content_text for fast search indexing.
+func (w *MediaWorker) labelAndIndexImage(ctx context.Context, file *model.File, thumbnailBytes []byte) {
+	if w.labeler == nil || !w.labeler.IsEnabled() {
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	isImg := strings.HasPrefix(file.ContentType, "image/") || ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".avif" || ext == ".bmp"
+	if !isImg {
+		return
+	}
+
+	// Use thumbnailBytes if available (faster, smaller payload for AI API) or download
+	var imgData []byte
+	if len(thumbnailBytes) > 0 {
+		imgData = thumbnailBytes
+	} else {
+		stream, err := w.storage.Download(ctx, file.StorageKey)
+		if err != nil {
+			logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("⚠️ Failed to download image for AI labeling")
+			return
+		}
+		imgData, err = io.ReadAll(io.LimitReader(stream, 4*1024*1024)) // Limit to 4MB
+		_ = stream.Close()
+		if err != nil {
+			logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("⚠️ Failed to read image bytes for AI labeling")
+			return
+		}
+	}
+
+	labels := w.labeler.LabelImage(ctx, imgData)
+	if len(labels) == 0 {
+		return
+	}
+
+	// Merge with existing file tags if any
+	existingTagsMap := make(map[string]bool)
+	for _, t := range file.Tags {
+		existingTagsMap[strings.ToLower(t)] = true
+	}
+	mergedTags := append([]string{}, file.Tags...)
+	for _, l := range labels {
+		clean := strings.TrimSpace(strings.ToLower(l))
+		if clean != "" && !existingTagsMap[clean] {
+			existingTagsMap[clean] = true
+			mergedTags = append(mergedTags, clean)
+		}
+	}
+
+	// Update tags in DB (fires DB trigger to update search_vector)
+	if err := w.fileRepo.UpdateTags(ctx, file.ID, mergedTags); err != nil {
+		logger.Log.Error().Err(err).Str("file_id", file.ID).Msg("❌ Failed to update file tags with AI labels")
+	}
+
+	// Also append to content_text for deep FTS indexing
+	labelsText := fmt.Sprintf("[AI Labels] %s", strings.Join(labels, " "))
+	if err := w.fileRepo.AppendToContentText(ctx, file.ID, labelsText); err != nil {
+		logger.Log.Error().Err(err).Str("file_id", file.ID).Msg("❌ Failed to append AI labels to content_text")
+	}
+
+	logger.Log.Info().
+		Str("file_id", file.ID).
+		Strs("labels", labels).
+		Msg("🏷️ AI image labeling completed and indexed")
+}
+
+// extractAndIndexText downloads the file from storage, extracts searchable text content,
+// and stores it in the database for PostgreSQL full-text search indexing.
+// Supports PDF (via pdftotext), DOCX (ZIP/XML parsing), and plain text formats.
+// Errors are non-fatal — the file will still become READY even if extraction fails.
+func (w *MediaWorker) extractAndIndexText(ctx context.Context, file *model.File) {
+	extractedText, extractErr := w.extractTextFromStorage(ctx, file)
+	if extractErr != nil {
+		logger.Log.Warn().Err(extractErr).Str("file_id", file.ID).Msg("⚠️ Text extraction failed (non-fatal)")
+		return
+	}
+
+	if extractedText == "" {
+		return // No extractable text (image, video, archive, etc.)
+	}
+
+	if err := w.fileRepo.UpdateContentText(ctx, file.ID, extractedText); err != nil {
+		logger.Log.Error().Err(err).Str("file_id", file.ID).Msg("❌ Failed to store extracted text in DB")
+		return
+	}
+
+	// Log a preview of extracted text (first 80 chars) for debugging
+	preview := extractedText
+	if len(preview) > 80 {
+		preview = preview[:80] + "..."
+	}
+	logger.Log.Info().
+		Str("file_id", file.ID).
+		Int("text_bytes", len(extractedText)).
+		Str("preview", preview).
+		Msg("🔍 Text extracted and indexed for full-text search")
+}
+
+// extractTextFromStorage downloads the file to a temp location and runs text extraction.
+// Returns the extracted text or empty string for unsupported formats.
+func (w *MediaWorker) extractTextFromStorage(ctx context.Context, file *model.File) (string, error) {
+	stream, err := w.storage.Download(ctx, file.StorageKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to download file for text extraction: %w", err)
+	}
+	defer stream.Close()
+
+	// Write to temp file (needed for PDF/DOCX which require random access)
+	tmpDir := os.TempDir()
+	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("textextract_%s%s", file.ID, filepath.Ext(file.Filename)))
+
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file for extraction: %w", err)
+	}
+	if _, err := io.Copy(tmpFile, stream); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write temp file for extraction: %w", err)
+	}
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	return textextract.ExtractFromFile(tmpPath, file.ContentType, file.Filename)
 }
 
 // 1. Image Handler (Go native image packages)

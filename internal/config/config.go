@@ -18,6 +18,15 @@ type Config struct {
 	Storage      StorageConfig      `koanf:"storage"`
 	Redis        RedisConfig        `koanf:"redis"`
 	Notification NotificationConfig `koanf:"notification"`
+	AI           AIConfig           `koanf:"ai"`
+}
+
+// AIConfig holds credentials for AI image labeling providers.
+// All fields are optional — when empty, AI labeling is silently skipped.
+type AIConfig struct {
+	VisionAPIKey string `koanf:"visionapikey"` // Google Cloud Vision API key
+	CFAccountID  string `koanf:"cfaccountid"`  // Cloudflare account ID
+	CFAPIToken   string `koanf:"cfapitoken"`   // Cloudflare Workers AI API token
 }
 
 type StorageConfig struct {
@@ -111,6 +120,9 @@ func Load() (*Config, error) {
 		}
 		if strings.HasPrefix(s, "notification_firebase_") {
 			return "notification.firebase." + strings.Replace(s[len("notification_firebase_"):], "_", "", -1)
+		}
+		if strings.HasPrefix(s, "ai_") {
+			return "ai." + strings.Replace(s[len("ai_"):], "_", "", -1)
 		}
 		parts := strings.SplitN(s, "_", 2)
 		if len(parts) == 2 {

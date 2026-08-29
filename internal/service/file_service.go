@@ -245,7 +245,7 @@ func (s *FileService) validateFile(ctx context.Context, userID string, size int6
 	return nil
 }
 
-func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename string, size int64, contentType string, folderID *string) (*model.File, string, error) {
+func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename string, size int64, contentType string, folderID *string, tags []string) (*model.File, string, error) {
 	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
 		return nil, "", err
 	}
@@ -261,6 +261,15 @@ func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename 
 		folderID = nil
 	}
 
+	// Normalize tags: trim whitespace, lowercase, remove empty entries
+	var cleanTags []string
+	for _, tag := range tags {
+		t := strings.TrimSpace(strings.ToLower(tag))
+		if t != "" {
+			cleanTags = append(cleanTags, t)
+		}
+	}
+
 	fileMeta := &model.File{
 		UserID:          userID,
 		Filename:        filename,
@@ -272,6 +281,7 @@ func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename 
 		IsPublic:        false,
 		Status:          "UPLOADING",
 		FolderID:        folderID,
+		Tags:            cleanTags,
 	}
 
 	if err := s.repo.Create(ctx, fileMeta); err != nil {
