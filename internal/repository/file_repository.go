@@ -304,7 +304,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY ` + orderClause + `
@@ -325,7 +325,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	var files []*model.File
 	for rows.Next() {
 		var f model.File
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags); err != nil {
 			return nil, "", err
 		}
 		files = append(files, &f)
@@ -376,7 +376,7 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	}
 
 	query := `
-		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads,
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags,
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
 		FROM files f
 		LEFT JOIN users u ON f.user_id = u.id
@@ -400,9 +400,9 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	for rows.Next() {
 		var f model.File
 		if err := rows.Scan(
-			&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey,
+			&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey,
 			&f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID,
-			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.OwnerName, &f.OwnerEmail,
+			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags, &f.OwnerName, &f.OwnerEmail,
 		); err != nil {
 			return nil, "", err
 		}
@@ -478,7 +478,7 @@ func (r *FileRepository) UpdateTags(ctx context.Context, id string, tags []strin
 
 func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID string) ([]*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
 		FROM files
 		WHERE folder_id = $1 AND status = 'READY' AND deleted_at IS NULL
 		ORDER BY filename ASC
@@ -508,6 +508,7 @@ func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID
 			&f.CreatedAt,
 			&f.UpdatedAt,
 			&f.Downloads,
+			&f.Tags,
 		)
 		if err != nil {
 			return nil, err

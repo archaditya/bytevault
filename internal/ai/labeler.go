@@ -19,10 +19,11 @@ import (
 )
 
 // MinConfidenceVision is the minimum confidence score for Google Vision labels.
-const MinConfidenceVision = 0.70
+const MinConfidenceVision = 0.60
 
 // MinConfidenceCF is the minimum confidence score for Cloudflare AI labels.
-const MinConfidenceCF = 0.60
+// ResNet-50 distributes probability across 1000 classes, so top predictions often have 0.10-0.45 score.
+const MinConfidenceCF = 0.10
 
 // MaxLabels is the maximum number of labels to return per image.
 const MaxLabels = 15
@@ -64,30 +65,31 @@ func (l *ImageLabeler) IsEnabled() bool {
 }
 
 // LabelImage attempts to classify an image using the configured provider chain.
+// Primary: Cloudflare Workers AI (100% Free) → Fallback: Google Cloud Vision API.
 // Returns a list of descriptive labels (e.g., ["banana", "fruit", "food"]).
-// Returns empty slice (not error) if all providers fail — this is intentional
-// since AI labeling failures should never block the file processing pipeline.
 func (l *ImageLabeler) LabelImage(ctx context.Context, imageBytes []byte) []string {
 	if l == nil || len(imageBytes) == 0 {
 		return nil
 	}
 
-	// Primary: Google Cloud Vision API
-	if l.visionAPIKey != "" {
-		labels, err := l.labelWithVisionAPI(ctx, imageBytes)
+	// 1. Primary: Cloudflare Workers AI (100% Free & Fast)
+	if l.cfAccountID != "" && l.cfAPIToken != "" {
+		labels, err := l.labelWithCloudflareAI(ctx, imageBytes)
 		if err != nil {
-			logger.Log.Warn().Err(err).Msg("⚠️ Google Vision API labeling failed, trying fallback")
+			logger.Log.Warn().Err(err).Msg("⚠️ Cloudflare AI labeling failed, trying Google fallback")
 		} else if len(labels) > 0 {
+			logger.Log.Info().Strs("labels", labels).Msg("🏷️ Cloudflare AI generated labels successfully")
 			return labels
 		}
 	}
 
-	// Fallback: Cloudflare Workers AI
-	if l.cfAccountID != "" && l.cfAPIToken != "" {
-		labels, err := l.labelWithCloudflareAI(ctx, imageBytes)
+	// 2. Fallback / Secondary: Google Cloud Vision API
+	if l.visionAPIKey != "" {
+		labels, err := l.labelWithVisionAPI(ctx, imageBytes)
 		if err != nil {
-			logger.Log.Warn().Err(err).Msg("⚠️ Cloudflare AI labeling failed (all providers exhausted)")
+			logger.Log.Warn().Err(err).Msg("⚠️ Google Vision API labeling failed (all providers exhausted)")
 		} else if len(labels) > 0 {
+			logger.Log.Info().Strs("labels", labels).Msg("🏷️ Google Vision API generated labels successfully")
 			return labels
 		}
 	}
@@ -237,15 +239,29 @@ func (l *ImageLabeler) labelWithCloudflareAI(ctx context.Context, imageBytes []b
 	}
 
 	var labels []string
+	existingMap := make(map[string]bool)
+
 	for _, result := range cfResp.Result {
-		if result.Score >= MinConfidenceCF && len(labels) < MaxLabels {
-			// CF returns labels like "banana, yellow banana" — normalize them
-			label := strings.ToLower(strings.TrimSpace(result.Label))
-			// Some CF labels contain underscores: "golden_retriever" → "golden retriever"
-			label = strings.ReplaceAll(label, "_", " ")
-			labels = append(labels, label)
+		// Include predictions with score >= MinConfidenceCF or always include top 3 predictions
+		if (result.Score >= MinConfidenceCF || len(labels) < 3) && len(labels) < MaxLabels {
+			rawLabel := strings.ToLower(strings.TrimSpace(result.Label))
+			rawLabel = strings.ReplaceAll(rawLabel, "_", " ")
+			// Split comma separated terms: e.g. "espresso, coffee" -> ["espresso", "coffee"]
+			parts := strings.Split(rawLabel, ",")
+			for _, p := range parts {
+				clean := strings.TrimSpace(p)
+				if clean != "" && !existingMap[clean] && len(labels) < MaxLabels {
+					existingMap[clean] = true
+					labels = append(labels, clean)
+				}
+			}
 		}
 	}
+
+	logger.Log.Info().
+		Int("result_count", len(cfResp.Result)).
+		Strs("parsed_labels", labels).
+		Msg("🤖 Cloudflare Workers AI classification response parsed")
 
 	return labels, nil
 }
