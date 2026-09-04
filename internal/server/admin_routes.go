@@ -8,6 +8,7 @@ import (
 func (s *Server) registerAdminRoutes(
 	protected *Group,
 	adminHandler *handler.AdminHandler,
+	moderationHandler *handler.ModerationHandler,
 ) {
 	admin := protected.Group("/admin")
 
@@ -28,4 +29,20 @@ func (s *Server) registerAdminRoutes(
 	// File Inspection
 	admin.GET("/files", adminHandler.ListAllFiles, appMiddleware.RequirePermission("admin:users"))
 	admin.GET("/files/shared", adminHandler.ListSharedFiles, appMiddleware.RequirePermission("admin:users"))
+
+	// Content Moderation (NSFW detection & user restriction management)
+	moderation := admin.Group("/moderation", appMiddleware.RequirePermission("admin:users"))
+	{
+		moderation.GET("/stats", moderationHandler.GetModerationStats)
+		moderation.GET("/flagged", moderationHandler.ListFlaggedFiles)
+		moderation.GET("/blocked", moderationHandler.ListBlockedFiles)
+		moderation.POST("/files/:id/approve", moderationHandler.ApproveFile)
+		moderation.POST("/files/:id/reject", moderationHandler.RejectFile)
+		moderation.GET("/users", moderationHandler.ListRestrictedUsers)
+		moderation.POST("/users/:id/restrict", moderationHandler.RestrictUser)
+		moderation.POST("/users/:id/unrestrict", moderationHandler.UnrestrictUser)
+		moderation.GET("/appeals", moderationHandler.ListAppeals)
+		moderation.POST("/appeals/:id/approve", moderationHandler.ApproveAppeal)
+		moderation.POST("/appeals/:id/reject", moderationHandler.RejectAppeal)
+	}
 }

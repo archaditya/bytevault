@@ -87,6 +87,7 @@ func (s *Server) registerRoutes() {
 	shareHandler := handler.NewShareHandler(shareService)
 	ephemeralHandler := handler.NewEphemeralHandler(ephemeralService)
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
+	moderationHandler := handler.NewModerationHandler(fileRepo, userRepo)
 
 	// 6. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")
@@ -105,11 +106,12 @@ func (s *Server) registerRoutes() {
 	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
 	s.registerFolderRoutes(v1, protected, folderHandler)
 	s.registerNotificationRoutes(protected, notifHandler)
-	s.registerAdminRoutes(protected, adminHandler)
+	s.registerAdminRoutes(protected, adminHandler, moderationHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
-	s.registerFileRoutes(v1, fileHandler, authMiddleware)
+	s.registerFileRoutes(v1, fileHandler, authMiddleware, userRepo)
 	s.registerShareRoutes(protected, shareHandler)
 	s.registerEphemeralRoutes(v1, protected, ephemeralHandler)
+	s.registerModerationUserRoutes(protected, moderationHandler)
 
 	// 7. Start Background Workers and Scheduler
 	if redisQueue != nil {
@@ -120,9 +122,10 @@ func (s *Server) registerRoutes() {
 			wp.Start()
 		}
 
-		// Start 2 concurrent Media Processing Workers (Images, Videos, PDFs + AI Image Labeling)
+		// Start 2 concurrent Media Processing Workers (Images, Videos, PDFs + AI Image Labeling + NSFW Detection)
 		imageLabeler := ai.NewImageLabeler(s.config.AI)
-		mediaWorker := worker.NewMediaWorker(fileRepo, store, redisQueue, imageLabeler)
+		nsfwDetector := ai.NewNSFWDetector(s.config.AI.HFAPIToken)
+		mediaWorker := worker.NewMediaWorker(fileRepo, userRepo, store, redisQueue, imageLabeler, nsfwDetector)
 		mediaWorker.Start(2)
 	}
 

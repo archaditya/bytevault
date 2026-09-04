@@ -27,6 +27,7 @@ type AIConfig struct {
 	VisionAPIKey string `koanf:"visionapikey"` // Google Cloud Vision API key
 	CFAccountID  string `koanf:"cfaccountid"`  // Cloudflare account ID
 	CFAPIToken   string `koanf:"cfapitoken"`   // Cloudflare Workers AI API token
+	HFAPIToken   string `koanf:"hfapitoken"`   // HuggingFace Inference API token (NSFW detection)
 }
 
 type StorageConfig struct {

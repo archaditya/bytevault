@@ -39,6 +39,11 @@ type User struct {
 	StorageLimitBytes *int64 `json:"storage_limit_bytes"` // User customized storage limit (bytes)
 	MaxFileSizeBytes  *int64 `json:"max_file_size_bytes"` // Per-user max single file upload size (bytes)
 
+	// Content moderation: NSFW strike & restriction system
+	NSFWStrikes       int        `json:"nsfw_strikes"`
+	RestrictedUntil   *time.Time `json:"restricted_until,omitempty"`
+	RestrictionReason *string    `json:"restriction_reason,omitempty"`
+
 	CreatedBy  *string   `json:"-"`
 	UpdatedBy  *string   `json:"-"`
 	DeletedBy  *string   `json:"-"`
@@ -46,4 +51,20 @@ type User struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	DeletedAt  *time.Time `json:"-"` // Pointer = nullable (soft delete)
+}
+
+// ModerationAppeal represents a user's appeal against account restriction.
+type ModerationAppeal struct {
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id"`
+	Reason      string     `json:"reason"`
+	Status      string     `json:"status"`       // pending, approved, rejected
+	AdminNotes  *string    `json:"admin_notes,omitempty"`
+	ReviewedBy  *string    `json:"reviewed_by,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ReviewedAt  *time.Time `json:"reviewed_at,omitempty"`
+
+	// Enriched fields for admin views
+	UserEmail   string     `json:"user_email,omitempty"`
+	UserName    string     `json:"user_name,omitempty"`
 }

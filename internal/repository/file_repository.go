@@ -81,7 +81,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -103,6 +103,7 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 		&file.UpdatedAt,
 		&file.Downloads,
 		&file.Tags,
+		&file.NSFWScore,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -173,7 +174,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ")
 
@@ -226,6 +227,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 			&f.UpdatedAt,
 			&f.Downloads,
 			&f.Tags,
+			&f.NSFWScore,
 		)
 		if err != nil {
 			return nil, "", err
@@ -350,7 +352,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY ` + orderClause + `
@@ -371,7 +373,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	var files []*model.File
 	for rows.Next() {
 		var f model.File
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags, &f.NSFWScore); err != nil {
 			return nil, "", err
 		}
 		files = append(files, &f)
@@ -435,7 +437,7 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	}
 
 	query := `
-		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags,
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, f.nsfw_score,
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
 		FROM files f
 		LEFT JOIN users u ON f.user_id = u.id
@@ -461,7 +463,7 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 		if err := rows.Scan(
 			&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey,
 			&f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID,
-			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags, &f.OwnerName, &f.OwnerEmail,
+			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags, &f.NSFWScore, &f.OwnerName, &f.OwnerEmail,
 		); err != nil {
 			return nil, "", err
 		}
@@ -537,7 +539,7 @@ func (r *FileRepository) UpdateTags(ctx context.Context, id string, tags []strin
 
 func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID string) ([]*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
 		FROM files
 		WHERE folder_id = $1 AND status = 'READY' AND deleted_at IS NULL
 		ORDER BY filename ASC
@@ -568,6 +570,7 @@ func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID
 			&f.UpdatedAt,
 			&f.Downloads,
 			&f.Tags,
+			&f.NSFWScore,
 		)
 		if err != nil {
 			return nil, err
@@ -575,4 +578,144 @@ func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID
 		files = append(files, &f)
 	}
 	return files, nil
+}
+
+// UpdateNSFWScore stores the NSFW detection score for a file.
+func (r *FileRepository) UpdateNSFWScore(ctx context.Context, id string, score float64) error {
+	query := `UPDATE files SET nsfw_score = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, score, id)
+	return err
+}
+
+// ListFlaggedFiles returns files with FLAGGED_REVIEW status for admin moderation.
+func (r *FileRepository) ListFlaggedFiles(ctx context.Context, limit int, cursor string) ([]*model.File, string, error) {
+	var conditions []string
+	var args []any
+	argIndex := 1
+
+	conditions = append(conditions, "f.deleted_at IS NULL")
+	conditions = append(conditions, "f.status = 'FLAGGED_REVIEW'")
+
+	if cursor != "" {
+		cursorTime, err := time.Parse(time.RFC3339, cursor)
+		if err == nil {
+			conditions = append(conditions, fmt.Sprintf("f.created_at < $%d", argIndex))
+			args = append(args, cursorTime)
+			argIndex++
+		}
+	}
+
+	query := `
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, f.nsfw_score,
+		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
+		FROM files f
+		LEFT JOIN users u ON f.user_id = u.id
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY f.nsfw_score DESC, f.created_at DESC
+	`
+
+	limitVal := 20
+	if limit > 0 {
+		limitVal = limit
+	}
+	query += fmt.Sprintf(" LIMIT %d", limitVal)
+	_ = argIndex // suppress unused warning
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var f model.File
+		if err := rows.Scan(
+			&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey,
+			&f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID,
+			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags, &f.NSFWScore, &f.OwnerName, &f.OwnerEmail,
+		); err != nil {
+			return nil, "", err
+		}
+		files = append(files, &f)
+	}
+
+	nextCursor := ""
+	if len(files) == limitVal && len(files) > 0 {
+		nextCursor = files[len(files)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	return files, nextCursor, nil
+}
+
+// ListBlockedNSFWFiles returns files that were auto-blocked by NSFW detection (audit trail).
+func (r *FileRepository) ListBlockedNSFWFiles(ctx context.Context, limit int, cursor string) ([]*model.File, string, error) {
+	var conditions []string
+	var args []any
+	argIndex := 1
+
+	conditions = append(conditions, "f.status = 'BLOCKED_NSFW'")
+
+	if cursor != "" {
+		cursorTime, err := time.Parse(time.RFC3339, cursor)
+		if err == nil {
+			conditions = append(conditions, fmt.Sprintf("f.created_at < $%d", argIndex))
+			args = append(args, cursorTime)
+			argIndex++
+		}
+	}
+
+	query := `
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, f.nsfw_score,
+		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
+		FROM files f
+		LEFT JOIN users u ON f.user_id = u.id
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY f.created_at DESC
+	`
+
+	limitVal := 20
+	if limit > 0 {
+		limitVal = limit
+	}
+	query += fmt.Sprintf(" LIMIT %d", limitVal)
+	_ = argIndex
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var files []*model.File
+	for rows.Next() {
+		var f model.File
+		if err := rows.Scan(
+			&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey, &f.ThumbnailKey,
+			&f.FileSize, &f.ContentType, &f.IsPublic, &f.Status, &f.FolderID,
+			&f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags, &f.NSFWScore, &f.OwnerName, &f.OwnerEmail,
+		); err != nil {
+			return nil, "", err
+		}
+		files = append(files, &f)
+	}
+
+	nextCursor := ""
+	if len(files) == limitVal && len(files) > 0 {
+		nextCursor = files[len(files)-1].CreatedAt.Format(time.RFC3339)
+	}
+
+	return files, nextCursor, nil
+}
+
+// GetModerationStats returns counts for admin moderation dashboard.
+func (r *FileRepository) GetModerationStats(ctx context.Context) (totalBlocked int, totalFlagged int, err error) {
+	query := `
+		SELECT
+			COALESCE(SUM(CASE WHEN status = 'BLOCKED_NSFW' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'FLAGGED_REVIEW' THEN 1 ELSE 0 END), 0)
+		FROM files
+	`
+	err = r.db.QueryRow(ctx, query).Scan(&totalBlocked, &totalFlagged)
+	return
 }
