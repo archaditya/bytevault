@@ -27,20 +27,24 @@ import (
 
 type MediaWorker struct {
 	fileRepo       *repository.FileRepository
+	userRepo       *repository.UserRepository
 	storage        storage.StorageProvider
 	queue          *queue.RedisQueue
 	malwareScanner security.MalwareScanner
 	labeler        *ai.ImageLabeler
+	nsfwDetector   *ai.NSFWDetector
 	stopChan       chan struct{}
 }
 
-func NewMediaWorker(fileRepo *repository.FileRepository, storage storage.StorageProvider, queue *queue.RedisQueue, labeler *ai.ImageLabeler) *MediaWorker {
+func NewMediaWorker(fileRepo *repository.FileRepository, userRepo *repository.UserRepository, storage storage.StorageProvider, queue *queue.RedisQueue, labeler *ai.ImageLabeler, nsfwDetector *ai.NSFWDetector) *MediaWorker {
 	return &MediaWorker{
 		fileRepo:       fileRepo,
+		userRepo:       userRepo,
 		storage:        storage,
 		queue:          queue,
 		malwareScanner: security.NewDefaultMalwareScanner(),
 		labeler:        labeler,
+		nsfwDetector:   nsfwDetector,
 		stopChan:       make(chan struct{}),
 	}
 }
@@ -104,7 +108,15 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 		}
 	}
 
-	// 2. Thumbnail Generation Stage
+	// 2. NSFW Content Scan Stage (BEFORE thumbnails/text extraction to avoid wasted compute)
+	// Scans image files for pornography/vulgarity using AI (primary) + heuristic (fallback).
+	// BLOCKED_NSFW: delete file + restrict user. FLAGGED_REVIEW: hide from public + notify admin.
+	if blocked := w.scanAndModerateNSFW(ctx, file); blocked {
+		// File was blocked or flagged — do NOT proceed with thumbnail/text/label pipeline
+		return nil
+	}
+
+	// 3. Thumbnail Generation Stage
 	contentType := strings.ToLower(file.ContentType)
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 
@@ -118,9 +130,6 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 	case contentType == "application/pdf" || ext == ".pdf":
 		thumbnailBytes, err = w.processPDF(ctx, file)
 	default:
-		// // Documents, spreadsheets, text files — generate branded poster
-		// thumbnailBytes = generateDocumentPoster(ext)
-
 		// Non-visual files (code, JSON, data, archives, audio) use high-fidelity vector icons on the frontend
 		thumbnailBytes = nil
 		err = nil
@@ -137,25 +146,132 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 		}
 	}
 
-	// 2.5. Text Extraction Stage (for full-text search indexing)
-	// Downloads the file, extracts searchable text (PDF, DOCX, TXT, code files),
-	// and stores it in DB. The PostgreSQL trigger auto-generates the search_vector.
-	// This step is non-fatal: extraction failures are logged but don't block READY status.
+	// 3.5. Text Extraction Stage (for full-text search indexing)
 	w.extractAndIndexText(ctx, file)
 
-	// 2.6. AI Image Labeling Stage (Auto-labels objects/scenes in photos for search)
-	// Runs Google Cloud Vision API with Cloudflare Workers AI fallback.
-	// Labels are added to tags and content_text, triggering PostgreSQL FTS search_vector update.
-	// This step is non-fatal: errors/missing keys won't block READY status.
+	// 3.6. AI Image Labeling Stage (Auto-labels objects/scenes in photos for search)
 	w.labelAndIndexImage(ctx, file, thumbnailBytes)
 
-	// 3. Mark File Status = 'READY' (Unlocks Access Gate for Users)
+	// 4. Mark File Status = 'READY' (Unlocks Access Gate for Users)
 	if err := w.fileRepo.UpdateStatus(ctx, file.ID, "READY"); err != nil {
 		return fmt.Errorf("failed to update status to READY: %w", err)
 	}
 
 	logger.Log.Info().Str("file_id", file.ID).Msg("✅ File passed security scan & thumbnailing -> Marked READY")
 	return nil
+}
+
+// scanAndModerateNSFW runs NSFW detection on image files and applies moderation actions.
+// Returns true if the file was blocked or flagged (caller should stop pipeline), false if safe.
+// Pipeline position: Step 2 — runs BEFORE thumbnails/text extraction to avoid wasted compute.
+func (w *MediaWorker) scanAndModerateNSFW(ctx context.Context, file *model.File) bool {
+	if w.nsfwDetector == nil || !w.nsfwDetector.IsEnabled() {
+		return false
+	}
+
+	// Only scan image files
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	isImg := strings.HasPrefix(file.ContentType, "image/") || ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".avif" || ext == ".bmp" || ext == ".gif"
+	if !isImg {
+		return false
+	}
+
+	// Download image bytes for NSFW analysis
+	stream, err := w.storage.Download(ctx, file.StorageKey)
+	if err != nil {
+		logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("⚠️ Failed to download image for NSFW scan, skipping")
+		return false
+	}
+	imgData, err := io.ReadAll(io.LimitReader(stream, 4*1024*1024)) // Limit to 4MB
+	_ = stream.Close()
+	if err != nil {
+		logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("⚠️ Failed to read image bytes for NSFW scan, skipping")
+		return false
+	}
+
+	result := w.nsfwDetector.DetectNSFW(ctx, imgData)
+
+	// Store NSFW score regardless of outcome (for audit trail)
+	_ = w.fileRepo.UpdateNSFWScore(ctx, file.ID, result.Score)
+
+	const blockThreshold = 0.85  // High confidence → auto-block
+	const flagThreshold = 0.55   // Medium confidence → flag for admin review
+
+	// --- HIGH CONFIDENCE NSFW: Auto-block ---
+	if result.Score >= blockThreshold {
+		logger.Log.Warn().
+			Str("file_id", file.ID).
+			Str("user_id", file.UserID).
+			Float64("score", result.Score).
+			Str("method", result.Method).
+			Msg("🚫 NSFW content BLOCKED — deleting file and applying user restriction")
+
+		// Delete the file from storage
+		_ = w.storage.Delete(ctx, file.StorageKey)
+		_ = w.fileRepo.UpdateStatus(ctx, file.ID, "BLOCKED_NSFW")
+
+		// Apply strike and escalation
+		w.applyNSFWStrike(ctx, file.UserID)
+		return true
+	}
+
+	// --- MEDIUM CONFIDENCE: Flag for admin review ---
+	if result.Score >= flagThreshold {
+		logger.Log.Warn().
+			Str("file_id", file.ID).
+			Str("user_id", file.UserID).
+			Float64("score", result.Score).
+			Str("method", result.Method).
+			Msg("⚠️ NSFW content FLAGGED for admin review")
+
+		_ = w.fileRepo.UpdateStatus(ctx, file.ID, "FLAGGED_REVIEW")
+		return true
+	}
+
+	// --- SAFE: Continue pipeline ---
+	logger.Log.Debug().
+		Str("file_id", file.ID).
+		Float64("score", result.Score).
+		Str("method", result.Method).
+		Msg("✅ NSFW scan passed — content is safe")
+	return false
+}
+
+// applyNSFWStrike increments the user's strike count and applies escalating restrictions.
+// Strike 1: Warning only | Strike 2: 24h restriction | Strike 3: 7d restriction | Strike 4+: Permanent
+func (w *MediaWorker) applyNSFWStrike(ctx context.Context, userID string) {
+	strikes, err := w.userRepo.IncrementNSFWStrikes(ctx, userID)
+	if err != nil {
+		logger.Log.Error().Err(err).Str("user_id", userID).Msg("❌ Failed to increment NSFW strikes")
+		return
+	}
+
+	switch {
+	case strikes == 1:
+		// Warning only — no restriction
+		logger.Log.Info().Str("user_id", userID).Int("strikes", strikes).Msg("⚠️ NSFW Strike 1: Warning issued to user")
+
+	case strikes == 2:
+		// 24-hour restriction
+		until := time.Now().Add(24 * time.Hour)
+		reason := "NSFW content violation (Strike 2/4) — 24 hour restriction"
+		_ = w.userRepo.RestrictUser(ctx, userID, &until, reason)
+		logger.Log.Warn().Str("user_id", userID).Int("strikes", strikes).Time("until", until).Msg("🔒 NSFW Strike 2: 24h account restriction applied")
+
+	case strikes == 3:
+		// 7-day restriction
+		until := time.Now().Add(7 * 24 * time.Hour)
+		reason := "NSFW content violation (Strike 3/4) — 7 day restriction"
+		_ = w.userRepo.RestrictUser(ctx, userID, &until, reason)
+		logger.Log.Warn().Str("user_id", userID).Int("strikes", strikes).Time("until", until).Msg("🔒 NSFW Strike 3: 7-day account restriction applied")
+
+	default:
+		// Permanent restriction (year 9999 = effectively permanent, admin must review)
+		until := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+		reason := fmt.Sprintf("NSFW content violation (Strike %d) — permanent restriction pending admin review", strikes)
+		_ = w.userRepo.RestrictUser(ctx, userID, &until, reason)
+		logger.Log.Error().Str("user_id", userID).Int("strikes", strikes).Msg("⛔ NSFW Strike 4+: PERMANENT account restriction — requires admin review")
+	}
 }
 
 // labelAndIndexImage classifies image files using AI (Google Vision / Cloudflare Workers AI)

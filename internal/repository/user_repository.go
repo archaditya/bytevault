@@ -422,3 +422,181 @@ func (r *UserRepository) GetMFAFields(ctx context.Context, userID string) (bool,
 	}
 	return enabled, secret, nil
 }
+
+// --- Content Moderation: NSFW Strike & Restriction System ---
+
+// IncrementNSFWStrikes atomically increments the user's NSFW strike count (skipping admins).
+func (r *UserRepository) IncrementNSFWStrikes(ctx context.Context, userID string) (int, error) {
+	var newCount int
+	query := `
+		UPDATE users 
+		SET nsfw_strikes = nsfw_strikes + 1, updated_at = NOW() 
+		WHERE id = $1 AND role != 'admin' AND deleted_at IS NULL
+		RETURNING nsfw_strikes
+	`
+	err := r.db.QueryRow(ctx, query, userID).Scan(&newCount)
+	return newCount, err
+}
+
+// RestrictUser sets a temporary or permanent restriction on the user's account (skipping admins).
+func (r *UserRepository) RestrictUser(ctx context.Context, userID string, until *time.Time, reason string) error {
+	query := `
+		UPDATE users 
+		SET restricted_until = $2, restriction_reason = $3, updated_at = NOW() 
+		WHERE id = $1 AND role != 'admin' AND deleted_at IS NULL
+	`
+	_, err := r.db.Exec(ctx, query, userID, until, reason)
+	return err
+}
+
+// Add GetAppealUserID:
+// GetAppealUserID retrieves the user_id associated with a moderation appeal.
+func (r *UserRepository) GetAppealUserID(ctx context.Context, appealID string) (string, error) {
+	var userID string
+	query := `SELECT user_id FROM moderation_appeals WHERE id = $1`
+	err := r.db.QueryRow(ctx, query, appealID).Scan(&userID)
+	return userID, err
+}
+
+// UnrestrictUser removes the restriction from the user's account and resets strikes.
+func (r *UserRepository) UnrestrictUser(ctx context.Context, userID string) error {
+	query := `UPDATE users SET restricted_until = NULL, restriction_reason = NULL, nsfw_strikes = 0, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, userID)
+	return err
+}
+
+// IsUserRestricted checks if a user is currently restricted (restricted_until > NOW).
+func (r *UserRepository) IsUserRestricted(ctx context.Context, userID string) (bool, *time.Time, *string, error) {
+	var restrictedUntil *time.Time
+	var reason *string
+	query := `SELECT restricted_until, restriction_reason FROM users WHERE id = $1 AND deleted_at IS NULL`
+	err := r.db.QueryRow(ctx, query, userID).Scan(&restrictedUntil, &reason)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil, nil, nil
+		}
+		return false, nil, nil, err
+	}
+	if restrictedUntil == nil {
+		return false, nil, nil, nil
+	}
+	if restrictedUntil.Before(time.Now()) {
+		// Restriction expired — auto-clear
+		_ = r.ClearExpiredRestriction(ctx, userID)
+		return false, nil, nil, nil
+	}
+	return true, restrictedUntil, reason, nil
+}
+
+// ClearExpiredRestriction removes an expired restriction without resetting strikes.
+func (r *UserRepository) ClearExpiredRestriction(ctx context.Context, userID string) error {
+	query := `UPDATE users SET restricted_until = NULL, restriction_reason = NULL, updated_at = NOW() WHERE id = $1 AND restricted_until < NOW()`
+	_, err := r.db.Exec(ctx, query, userID)
+	return err
+}
+
+// ListRestrictedUsers returns all users currently under restriction (for admin dashboard).
+func (r *UserRepository) ListRestrictedUsers(ctx context.Context) ([]model.User, error) {
+	query := `
+		SELECT id, email, first_name, last_name, nsfw_strikes, restricted_until, restriction_reason, created_at
+		FROM users
+		WHERE restricted_until IS NOT NULL AND restricted_until > NOW() AND deleted_at IS NULL
+		ORDER BY restricted_until DESC
+	`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []model.User
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.NSFWStrikes, &u.RestrictedUntil, &u.RestrictionReason, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+// GetRestrictedUsersCount returns the count of currently restricted users.
+func (r *UserRepository) GetRestrictedUsersCount(ctx context.Context) (int, error) {
+	var count int
+	query := `SELECT COUNT(*) FROM users WHERE restricted_until IS NOT NULL AND restricted_until > NOW() AND deleted_at IS NULL`
+	err := r.db.QueryRow(ctx, query).Scan(&count)
+	return count, err
+}
+
+// --- Moderation Appeals ---
+
+// CreateAppeal inserts a new moderation appeal from a restricted user.
+func (r *UserRepository) CreateAppeal(ctx context.Context, userID string, reason string) (*model.ModerationAppeal, error) {
+	var appeal model.ModerationAppeal
+	query := `
+		INSERT INTO moderation_appeals (user_id, reason) VALUES ($1, $2)
+		RETURNING id, user_id, reason, status, created_at
+	`
+	err := r.db.QueryRow(ctx, query, userID, reason).Scan(
+		&appeal.ID, &appeal.UserID, &appeal.Reason, &appeal.Status, &appeal.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create appeal: %w", err)
+	}
+	return &appeal, nil
+}
+
+// ListPendingAppeals returns all unresolved appeals for admin review.
+func (r *UserRepository) ListPendingAppeals(ctx context.Context) ([]model.ModerationAppeal, error) {
+	query := `
+		SELECT a.id, a.user_id, a.reason, a.status, a.admin_notes, a.reviewed_by, a.created_at, a.reviewed_at,
+		       COALESCE(u.email, '') as user_email, COALESCE(u.first_name || ' ' || u.last_name, '') as user_name
+		FROM moderation_appeals a
+		LEFT JOIN users u ON a.user_id = u.id
+		WHERE a.status = 'pending'
+		ORDER BY a.created_at ASC
+	`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var appeals []model.ModerationAppeal
+	for rows.Next() {
+		var a model.ModerationAppeal
+		if err := rows.Scan(
+			&a.ID, &a.UserID, &a.Reason, &a.Status, &a.AdminNotes, &a.ReviewedBy,
+			&a.CreatedAt, &a.ReviewedAt, &a.UserEmail, &a.UserName,
+		); err != nil {
+			return nil, err
+		}
+		appeals = append(appeals, a)
+	}
+	return appeals, nil
+}
+
+// ResolveAppeal marks an appeal as approved or rejected by the admin.
+func (r *UserRepository) ResolveAppeal(ctx context.Context, appealID string, status string, adminNotes string, reviewedBy string) error {
+	query := `
+		UPDATE moderation_appeals
+		SET status = $2, admin_notes = $3, reviewed_by = $4, reviewed_at = NOW()
+		WHERE id = $1
+	`
+	_, err := r.db.Exec(ctx, query, appealID, status, adminNotes, reviewedBy)
+	return err
+}
+
+// GetPendingAppealsCount returns the count of unresolved appeals.
+func (r *UserRepository) GetPendingAppealsCount(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM moderation_appeals WHERE status = 'pending'`).Scan(&count)
+	return count, err
+}
+
+// HasPendingAppeal checks if a user already has a pending appeal.
+func (r *UserRepository) HasPendingAppeal(ctx context.Context, userID string) (bool, error) {
+	var count int
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM moderation_appeals WHERE user_id = $1 AND status = 'pending'`, userID).Scan(&count)
+	return count > 0, err
+}
