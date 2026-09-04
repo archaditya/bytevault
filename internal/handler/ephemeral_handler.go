@@ -89,8 +89,17 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 		PartCount   int     `json:"part_count"`
 	}
 
-	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.PartCount <= 0 {
-		return SendError(c, http.StatusBadRequest, "filename, file_size, and part_count are required")
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "Invalid request format")
+	}
+	if req.Filename == "" {
+		return SendError(c, http.StatusBadRequest, "filename is required")
+	}
+	if req.FileSize <= 0 {
+		return SendError(c, http.StatusBadRequest, "file_size must be greater than 0")
+	}
+	if req.PartCount <= 0 {
+		return SendError(c, http.StatusBadRequest, "part_count must be at least 1")
 	}
 
 	ip := c.RealIP()

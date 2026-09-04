@@ -125,6 +125,12 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 		}
 	}
 
+	// Validate partCount against maximum upper bound to prevent DoS via excessive presigned URL generation
+	const MaxPartsAllowed = 2000
+	if partCount <= 0 || partCount > MaxPartsAllowed {
+		return nil, "", nil, fmt.Errorf("part_count must be between 1 and %d", MaxPartsAllowed)
+	}
+
 	ttl := time.Duration(settings.ExpiryMinutes) * time.Minute
 
 	tokenBytes := make([]byte, 16)
@@ -189,6 +195,14 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 		return err
 	}
 
+	// Guard against re-completing or completing burned/expired shares
+	if share.Status != "UPLOADING" {
+		return fmt.Errorf("upload session is not in UPLOADING state (current status: %s)", share.Status)
+	}
+	if time.Now().After(share.ExpiresAt) {
+		return fmt.Errorf("upload session has expired")
+	}
+
 	_, err = s.storage.CompleteMultipartUpload(ctx, share.StorageKey, uploadID, parts)
 	if err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
@@ -201,6 +215,12 @@ func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token strin
 	share, err := s.repo.FindByToken(ctx, token)
 	if err != nil {
 		return err
+	}
+
+	// Security: Only allow aborting sessions that are actively uploading.
+	// Prevents malicious clients from deleting already completed ACTIVE shares.
+	if share.Status != "UPLOADING" {
+		return fmt.Errorf("cannot abort session: share is already %s", share.Status)
 	}
 
 	_ = s.storage.AbortMultipartUpload(ctx, share.StorageKey, uploadID)
