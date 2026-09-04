@@ -85,6 +85,18 @@ func (r *EphemeralShareRepository) MarkBurned(ctx context.Context, id string) er
 	return err
 }
 
+func (r *EphemeralShareRepository) UpdateStatus(ctx context.Context, token string, status string) error {
+	query := `UPDATE ephemeral_shares SET status = $1 WHERE token = $2`
+	_, err := r.db.Exec(ctx, query, status, token)
+	return err
+}
+
+func (r *EphemeralShareRepository) DeleteByToken(ctx context.Context, token string) error {
+	query := `DELETE FROM ephemeral_shares WHERE token = $1`
+	_, err := r.db.Exec(ctx, query, token)
+	return err
+}
+
 func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, offset int) ([]*model.EphemeralShare, int, error) {
 	var total int
 	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ephemeral_shares`).Scan(&total)
