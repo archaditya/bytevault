@@ -425,19 +425,37 @@ func (r *UserRepository) GetMFAFields(ctx context.Context, userID string) (bool,
 
 // --- Content Moderation: NSFW Strike & Restriction System ---
 
-// IncrementNSFWStrikes atomically increments the user's NSFW strike count and returns the new count.
+// IncrementNSFWStrikes atomically increments the user's NSFW strike count (skipping admins).
 func (r *UserRepository) IncrementNSFWStrikes(ctx context.Context, userID string) (int, error) {
 	var newCount int
-	query := `UPDATE users SET nsfw_strikes = nsfw_strikes + 1, updated_at = NOW() WHERE id = $1 RETURNING nsfw_strikes`
+	query := `
+		UPDATE users 
+		SET nsfw_strikes = nsfw_strikes + 1, updated_at = NOW() 
+		WHERE id = $1 AND role != 'admin' AND deleted_at IS NULL
+		RETURNING nsfw_strikes
+	`
 	err := r.db.QueryRow(ctx, query, userID).Scan(&newCount)
 	return newCount, err
 }
 
-// RestrictUser sets a temporary or permanent restriction on the user's account.
+// RestrictUser sets a temporary or permanent restriction on the user's account (skipping admins).
 func (r *UserRepository) RestrictUser(ctx context.Context, userID string, until *time.Time, reason string) error {
-	query := `UPDATE users SET restricted_until = $2, restriction_reason = $3, updated_at = NOW() WHERE id = $1`
+	query := `
+		UPDATE users 
+		SET restricted_until = $2, restriction_reason = $3, updated_at = NOW() 
+		WHERE id = $1 AND role != 'admin' AND deleted_at IS NULL
+	`
 	_, err := r.db.Exec(ctx, query, userID, until, reason)
 	return err
+}
+
+// Add GetAppealUserID:
+// GetAppealUserID retrieves the user_id associated with a moderation appeal.
+func (r *UserRepository) GetAppealUserID(ctx context.Context, appealID string) (string, error) {
+	var userID string
+	query := `SELECT user_id FROM moderation_appeals WHERE id = $1`
+	err := r.db.QueryRow(ctx, query, appealID).Scan(&userID)
+	return userID, err
 }
 
 // UnrestrictUser removes the restriction from the user's account and resets strikes.

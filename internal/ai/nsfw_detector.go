@@ -143,30 +143,33 @@ func (d *NSFWDetector) detectWithHuggingFace(ctx context.Context, imageBytes []b
 // --- go-nude heuristic fallback ---
 
 func (d *NSFWDetector) detectWithHeuristic(imageBytes []byte) NSFWResult {
-	// go-nude only works with file paths, so write to a temp file
+	// go-nude requires a file path, so write to a temp file
 	tmpFile, err := os.CreateTemp("", "nsfw-scan-*.jpg")
 	if err != nil {
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to create temp file, treating as safe")
-		return NSFWResult{Score: 0, Label: "normal", Method: "heuristic"}
+		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to create temp file, queuing for review")
+		// Fail-safe: Flag for admin review rather than blindly passing as safe
+		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
 	}
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
 	if _, err := tmpFile.Write(imageBytes); err != nil {
 		tmpFile.Close()
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to write temp file, treating as safe")
-		return NSFWResult{Score: 0, Label: "normal", Method: "heuristic"}
+		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to write temp file, queuing for review")
+		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
 	}
 	tmpFile.Close()
 
 	isNude, err := nude.IsNude(tmpPath)
 	if err != nil {
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: analysis failed, treating as safe")
-		return NSFWResult{Score: 0, Label: "normal", Method: "heuristic"}
+		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: analysis failed, queuing for review")
+		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
 	}
 
 	if isNude {
-		return NSFWResult{Score: 0.90, Label: "nsfw", Method: "heuristic"}
+		// Heuristic detection: Cap at 0.65 so it triggers FLAGGED_REVIEW (admin verification)
+		// and never triggers automated account bans or instant file deletion.
+		return NSFWResult{Score: 0.65, Label: "nsfw", Method: "heuristic"}
 	}
 	return NSFWResult{Score: 0.05, Label: "normal", Method: "heuristic"}
 }

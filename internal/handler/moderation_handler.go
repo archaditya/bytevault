@@ -155,7 +155,7 @@ func (h *ModerationHandler) ListAppeals(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"status": "success", "data": map[string]any{"appeals": appeals}})
 }
 
-// ApproveAppeal approves a user's appeal, unrestricting them and resetting strikes.
+// ApproveAppeal approves a user's appeal, un-restricting them and resetting strikes.
 func (h *ModerationHandler) ApproveAppeal(c echo.Context) error {
 	appealID := c.Param("id")
 	adminID := c.Get("user_id").(string)
@@ -166,21 +166,65 @@ func (h *ModerationHandler) ApproveAppeal(c echo.Context) error {
 	}
 	_ = c.Bind(&body)
 
-	// Find the appeal to get the user ID
-	// For simplicity, resolve the appeal first
+	// Fetch appeal details to obtain target user_id
+	targetUserID, err := h.userRepo.GetAppealUserID(ctx, appealID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]any{"error": "Appeal not found"})
+	}
+
 	if err := h.userRepo.ResolveAppeal(ctx, appealID, "approved", body.Notes, adminID); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to approve appeal"})
 	}
 
-	// We need the user_id from the appeal — query it
-	appeals, _ := h.userRepo.ListPendingAppeals(ctx)
-	// Since we just approved it, it won't be in pending anymore
-	// Use a direct query approach instead
-	_ = appeals // The appeal is already resolved, unrestrict based on the appeal data
+	// Automatically unrestrict the user and reset strikes
+	if err := h.userRepo.UnrestrictUser(ctx, targetUserID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Appeal approved but failed to unrestrict user"})
+	}
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"status": "success",
-		"detail": "Appeal approved. Use the unrestrict endpoint to remove the user's restriction.",
+		"detail": "Appeal approved and user restriction lifted successfully",
+	})
+}
+
+// SubmitAppeal allows a restricted user to submit an appeal.
+func (h *ModerationHandler) SubmitAppeal(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+	ctx := c.Request().Context()
+
+	// Verify user is actually restricted
+	isRestricted, _, _, err := h.userRepo.IsUserRestricted(ctx, userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to check restriction status"})
+	}
+	if !isRestricted {
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Your account is not currently restricted"})
+	}
+
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.Bind(&body); err != nil || body.Reason == "" {
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Please provide a reason for your appeal"})
+	}
+
+	hasPending, err := h.userRepo.HasPendingAppeal(ctx, userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to check appeal status"})
+	}
+	if hasPending {
+		return c.JSON(http.StatusConflict, map[string]any{"error": "You already have a pending appeal. Please wait for admin review."})
+	}
+
+	appeal, err := h.userRepo.CreateAppeal(ctx, userID, body.Reason)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to submit appeal"})
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"status": "success",
+		"detail": "Appeal submitted successfully. An admin will review within 24-48 hours.",
+		"data":   appeal,
 	})
 }
 
@@ -203,39 +247,6 @@ func (h *ModerationHandler) RejectAppeal(c echo.Context) error {
 }
 
 // --- User-facing Endpoints ---
-
-// SubmitAppeal allows a restricted user to submit an appeal.
-func (h *ModerationHandler) SubmitAppeal(c echo.Context) error {
-	userID := c.Get("user_id").(string)
-	ctx := c.Request().Context()
-
-	var body struct {
-		Reason string `json:"reason"`
-	}
-	if err := c.Bind(&body); err != nil || body.Reason == "" {
-		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Please provide a reason for your appeal"})
-	}
-
-	// Check if user already has a pending appeal
-	hasPending, err := h.userRepo.HasPendingAppeal(ctx, userID)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to check appeal status"})
-	}
-	if hasPending {
-		return c.JSON(http.StatusConflict, map[string]any{"error": "You already have a pending appeal. Please wait for admin review."})
-	}
-
-	appeal, err := h.userRepo.CreateAppeal(ctx, userID, body.Reason)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to submit appeal"})
-	}
-
-	return c.JSON(http.StatusCreated, map[string]any{
-		"status": "success",
-		"detail": "Appeal submitted successfully. An admin will review within 24-48 hours.",
-		"data":   appeal,
-	})
-}
 
 // GetRestrictionStatus returns the current restriction status for the authenticated user.
 func (h *ModerationHandler) GetRestrictionStatus(c echo.Context) error {

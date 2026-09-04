@@ -81,7 +81,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -174,7 +174,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ")
 
@@ -352,7 +352,7 @@ func (r *FileRepository) ListAllFiles(ctx context.Context, search string, limit 
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY ` + orderClause + `
@@ -437,7 +437,7 @@ func (r *FileRepository) ListAllSharedFiles(ctx context.Context, search string, 
 	}
 
 	query := `
-		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, f.nsfw_score,
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, COALESCE(f.nsfw_score, 0),
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
 		FROM files f
 		LEFT JOIN users u ON f.user_id = u.id
@@ -539,7 +539,7 @@ func (r *FileRepository) UpdateTags(ctx context.Context, id string, tags []strin
 
 func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID string) ([]*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, nsfw_score
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
 		FROM files
 		WHERE folder_id = $1 AND status = 'READY' AND deleted_at IS NULL
 		ORDER BY filename ASC
@@ -606,7 +606,7 @@ func (r *FileRepository) ListFlaggedFiles(ctx context.Context, limit int, cursor
 	}
 
 	query := `
-		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, f.nsfw_score,
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, COALESCE(f.nsfw_score, 0),
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
 		FROM files f
 		LEFT JOIN users u ON f.user_id = u.id
@@ -666,7 +666,7 @@ func (r *FileRepository) ListBlockedNSFWFiles(ctx context.Context, limit int, cu
 	}
 
 	query := `
-		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, f.nsfw_score,
+		SELECT f.id, f.user_id, f.filename, f.storage_provider, f.bucket, f.storage_key, f.thumbnail_key, f.file_size, f.content_type, f.is_public, f.status, f.folder_id, f.created_at, f.updated_at, f.downloads, f.tags, COALESCE(f.nsfw_score, 0),
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as owner_name, COALESCE(u.email, '') as owner_email
 		FROM files f
 		LEFT JOIN users u ON f.user_id = u.id
