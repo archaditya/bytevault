@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/labstack/echo/v4"
+	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/service"
 )
@@ -75,6 +76,99 @@ func (h *EphemeralHandler) CreateUploadSession(c echo.Context) error {
 		"token":      share.Token,
 		"upload_url": uploadURL,
 		"expires_at": share.ExpiresAt,
+	}, nil)
+}
+
+// POST /api/v1/ephemeral/multipart-session (Public Guest)
+func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
+	var req struct {
+		Filename    string  `json:"filename"`
+		FileSize    int64   `json:"file_size"`
+		ContentType string  `json:"content_type"`
+		Password    *string `json:"password"`
+		PartCount   int     `json:"part_count"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "Invalid request format")
+	}
+	if req.Filename == "" {
+		return SendError(c, http.StatusBadRequest, "filename is required")
+	}
+	if req.FileSize <= 0 {
+		return SendError(c, http.StatusBadRequest, "file_size must be greater than 0")
+	}
+	if req.PartCount <= 0 {
+		return SendError(c, http.StatusBadRequest, "part_count must be at least 1")
+	}
+
+	ip := c.RealIP()
+	ua := c.Request().UserAgent()
+
+	share, uploadID, partURLs, err := h.service.CreateMultipartUploadSession(
+		c.Request().Context(),
+		req.Filename,
+		req.FileSize,
+		req.ContentType,
+		req.Password,
+		&ip,
+		&ua,
+		req.PartCount,
+	)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusCreated, map[string]any{
+		"token":      share.Token,
+		"upload_id":  uploadID,
+		"part_urls":  partURLs,
+		"expires_at": share.ExpiresAt,
+	}, nil)
+}
+
+// POST /api/v1/ephemeral/complete-multipart/:token (Public Guest)
+func (h *EphemeralHandler) CompleteMultipartSession(c echo.Context) error {
+	token := c.Param("token")
+
+	var req struct {
+		UploadID string             `json:"upload_id"`
+		Parts    []model.UploadPart `json:"parts"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.Parts) == 0 {
+		return SendError(c, http.StatusBadRequest, "upload_id and parts are required")
+	}
+
+	err := h.service.CompleteMultipartUpload(c.Request().Context(), token, req.UploadID, req.Parts)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{
+		"message": "Multipart upload completed successfully",
+	}, nil)
+}
+
+// POST /api/v1/ephemeral/abort-multipart/:token (Public Guest)
+func (h *EphemeralHandler) AbortMultipartSession(c echo.Context) error {
+	token := c.Param("token")
+
+	var req struct {
+		UploadID string `json:"upload_id"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" {
+		return SendError(c, http.StatusBadRequest, "upload_id is required")
+	}
+
+	err := h.service.AbortMultipartUpload(c.Request().Context(), token, req.UploadID)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{
+		"message": "Multipart upload aborted",
 	}, nil)
 }
 
