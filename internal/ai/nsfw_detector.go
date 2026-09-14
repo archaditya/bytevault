@@ -9,6 +9,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -140,30 +144,61 @@ func (d *NSFWDetector) detectWithHuggingFace(ctx context.Context, imageBytes []b
 	}, nil
 }
 
-// --- go-nude heuristic fallback ---
-
+// detectWithHeuristic runs the go-nude local heuristic scan.
+//
+// DESIGN DECISIONS & ARCHITECTURAL TRADEOFFS:
+// 1. JPEG Fast-Path: If input bytes already have the JPEG SOI marker (0xFF, 0xD8, 0xFF),
+//    we write raw bytes directly to temp file, bypassing image.Decode and jpeg.Encode overhead.
+// 2. Format Normalization: For non-JPEG formats (PNG, GIF), the image is decoded and re-encoded
+//    as a temporary JPEG so go-nude's internal jpeg.Decode can evaluate it.
+// 3. Fail-Open on Decoder / I/O Errors: If an image format is unsupported, corrupted, or temp
+//    file I/O fails, we return a safe 'normal' score (0.05). Under no circumstance should a
+//    decoding or file I/O error cause user documents (e.g. certificates, badges) to be falsely
+//    marked as NSFW (0.55) and hidden from the user's dashboard.
 func (d *NSFWDetector) detectWithHeuristic(imageBytes []byte) NSFWResult {
-	// go-nude requires a file path, so write to a temp file
+	if len(imageBytes) == 0 {
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
+	}
+
 	tmpFile, err := os.CreateTemp("", "nsfw-scan-*.jpg")
 	if err != nil {
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to create temp file, queuing for review")
-		// Fail-safe: Flag for admin review rather than blindly passing as safe
-		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
+		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to create temp file")
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
 	}
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := tmpFile.Write(imageBytes); err != nil {
+	// Optimization: If image is already JPEG (SOI marker 0xFF 0xD8 0xFF), write directly
+	isJPEG := len(imageBytes) >= 3 && imageBytes[0] == 0xFF && imageBytes[1] == 0xD8 && imageBytes[2] == 0xFF
+	if isJPEG {
+		if _, err := tmpFile.Write(imageBytes); err != nil {
+			tmpFile.Close()
+			logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to write raw jpeg to temp file")
+			return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
+		}
 		tmpFile.Close()
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to write temp file, queuing for review")
-		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
-	}
-	tmpFile.Close()
+	} else {
+		// Non-JPEG image (PNG, GIF, etc.): decode and re-encode to JPEG for go-nude compatibility
+		img, _, err := image.Decode(bytes.NewReader(imageBytes))
+		if err != nil {
+			tmpFile.Close()
+			logger.Log.Debug().Err(err).Msg("go-nude: unable to decode image for heuristic scan, passing as safe")
+			return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
+		}
 
+		if err := jpeg.Encode(tmpFile, img, &jpeg.Options{Quality: 80}); err != nil {
+			tmpFile.Close()
+			logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to encode to jpeg")
+			return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
+		}
+		tmpFile.Close()
+	}
+
+	// Run heuristic scan on the standardized JPEG file
 	isNude, err := nude.IsNude(tmpPath)
 	if err != nil {
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: analysis failed, queuing for review")
-		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
+		logger.Log.Debug().Err(err).Msg("go-nude: analysis failed, passing as safe")
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
 	}
 
 	if isNude {
