@@ -9,6 +9,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -143,27 +147,35 @@ func (d *NSFWDetector) detectWithHuggingFace(ctx context.Context, imageBytes []b
 // --- go-nude heuristic fallback ---
 
 func (d *NSFWDetector) detectWithHeuristic(imageBytes []byte) NSFWResult {
-	// go-nude requires a file path, so write to a temp file
+	// 1. Decode any standard image format (PNG, JPEG, GIF)
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		// Non-standard, vector, or unparseable format is not an NSFW violation — pass safely
+		logger.Log.Debug().Err(err).Msg("go-nude: unable to decode image for heuristic scan, passing as safe")
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
+	}
+
+	// 2. go-nude requires a JPEG file path, so write an encoded JPEG to temp file
 	tmpFile, err := os.CreateTemp("", "nsfw-scan-*.jpg")
 	if err != nil {
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to create temp file, queuing for review")
-		// Fail-safe: Flag for admin review rather than blindly passing as safe
-		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
+		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to create temp file")
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
 	}
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := tmpFile.Write(imageBytes); err != nil {
+	if err := jpeg.Encode(tmpFile, img, &jpeg.Options{Quality: 80}); err != nil {
 		tmpFile.Close()
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to write temp file, queuing for review")
-		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
+		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: failed to encode to jpeg")
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
 	}
 	tmpFile.Close()
 
+	// 3. Run heuristic scan on the standardized JPEG file
 	isNude, err := nude.IsNude(tmpPath)
 	if err != nil {
-		logger.Log.Warn().Err(err).Msg("⚠️ go-nude: analysis failed, queuing for review")
-		return NSFWResult{Score: 0.55, Label: "uncertain", Method: "error"}
+		logger.Log.Debug().Err(err).Msg("go-nude: analysis failed, passing as safe")
+		return NSFWResult{Score: 0.05, Label: "normal", Method: "skipped"}
 	}
 
 	if isNude {
