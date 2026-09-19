@@ -5,9 +5,10 @@ import (
 )
 
 // registerHealthRoutes adds system/infra routes.
-// These are always public — no auth needed.
+// These are public endpoints for orchestrators and uptime monitors.
 func (s *Server) registerHealthRoutes(v1 *Group) {
-	healthHandler := handler.NewHealthHandler()
+	healthHandler := handler.NewHealthHandler(s.db)
 
 	v1.GET("/health", healthHandler.Health)
+	v1.GET("/health/deep", healthHandler.DeepHealth)
 }

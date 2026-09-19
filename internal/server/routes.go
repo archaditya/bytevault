@@ -12,10 +12,12 @@ import (
 	"github.com/archaditya/bytevault/internal/storage/r2"
 
 	"github.com/archaditya/bytevault/internal/ai"
+	"github.com/archaditya/bytevault/internal/monitoring"
 	"github.com/archaditya/bytevault/internal/notification/email"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/notification/scheduler"
 	"github.com/archaditya/bytevault/internal/notification/worker"
+	"github.com/archaditya/bytevault/internal/razorpay"
 
 	"github.com/labstack/echo/v4"
 )
@@ -68,6 +70,23 @@ func (s *Server) registerRoutes() {
 	notifRepo := repository.NewNotificationRepository(s.db)
 	contactRepo := repository.NewContactRepository(s.db)
 
+	// Subscription Repositories
+	pkgRepo := repository.NewPackageRepository(s.db)
+	subRepo := repository.NewSubscriptionRepository(s.db)
+	txnRepo := repository.NewTransactionRepository(s.db)
+	subAuditRepo := repository.NewSubscriptionAuditRepository(s.db)
+	webhookEventRepo := repository.NewWebhookEventRepository(s.db)
+	systemLogRepo := repository.NewSystemLogRepository(s.db)
+
+	// Razorpay Client & File Audit Logging
+	var razorpayClient *razorpay.Client
+	if s.config.Razorpay.KeyID != "" {
+		razorpayClient = razorpay.NewClient(s.config.Razorpay.KeyID, s.config.Razorpay.KeySecret, s.config.Razorpay.WebhookSecret)
+	}
+	auditLogger, _ := monitoring.NewFileAuditLogger("logs")
+	logArchiver := monitoring.NewLogArchiver("logs", store)
+	logArchiver.SetTracker(systemLogRepo)
+
 	// 4. Initialize Services
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
 	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, deviceRepo, userRepo)
@@ -79,6 +98,22 @@ func (s *Server) registerRoutes() {
 	ephemeralService := service.NewEphemeralService(ephemeralRepo, ephemeralSettingRepo, store)
 	contactService := service.NewContactService(contactRepo, emailClient)
 
+	// Subscription Services
+	pkgService := service.NewPackageService(pkgRepo, razorpayClient)
+	txnService := service.NewTransactionService(txnRepo, subRepo, pkgRepo, emailClient)
+	appURL := "https://pushport.archadi.dev"
+	if s.config.App.Env == "development" {
+		appURL = "http://localhost:3000"
+	}
+	txnService.SetAppURL(appURL)
+	subService := service.NewSubscriptionService(subRepo, pkgRepo, userRepo, subAuditRepo, razorpayClient, auditLogger, notifService)
+	fileService.SetSubscriptionRepo(subRepo)
+
+	// Bandwidth & Egress Metering
+	bandwidthRepo := repository.NewBandwidthRepository(s.db)
+	fileService.SetBandwidthRepo(bandwidthRepo)
+	ephemeralService.SetBandwidthRepo(bandwidthRepo)
+
 	// 5. Initialize Handlers
 	fileHandler := handler.NewFileHandler(fileService, s.config.Storage.LocalDir)
 	folderHandler := handler.NewFolderHandler(folderService)
@@ -88,6 +123,17 @@ func (s *Server) registerRoutes() {
 	ephemeralHandler := handler.NewEphemeralHandler(ephemeralService)
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 	moderationHandler := handler.NewModerationHandler(fileRepo, userRepo)
+
+	// Subscription Handlers
+	subHandler := handler.NewSubscriptionHandler(subService, txnService, s.config.Razorpay.KeyID)
+	pkgHandler := handler.NewPackageHandler(pkgService, subService, txnService, subRepo, subAuditRepo)
+	pkgHandler.SetSystemLogRepo(systemLogRepo)
+	webhookHandler := handler.NewWebhookHandler(razorpayClient, subRepo, pkgRepo, userRepo, subAuditRepo, txnService, auditLogger, notifService, webhookEventRepo)
+	adminHandler.SetSubscriptionDependencies(subRepo, subService)
+	adminHandler.SetMonitoringDependencies(monitoring.GlobalTelemetry, bandwidthRepo, s.db)
+
+	// Static public assets (brand logos, icons, email assets)
+	s.echo.Static("/static", "public")
 
 	// 6. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")
@@ -103,15 +149,16 @@ func (s *Server) registerRoutes() {
 	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo)
 
 	// Delegate Route Groupings
-	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store)
+	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store, subRepo)
 	s.registerFolderRoutes(v1, protected, folderHandler)
 	s.registerNotificationRoutes(protected, notifHandler)
-	s.registerAdminRoutes(protected, adminHandler, moderationHandler)
+	s.registerAdminRoutes(protected, adminHandler, moderationHandler, pkgHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
 	s.registerFileRoutes(v1, fileHandler, authMiddleware, userRepo)
 	s.registerShareRoutes(protected, shareHandler)
 	s.registerEphemeralRoutes(v1, protected, ephemeralHandler)
 	s.registerModerationUserRoutes(protected, moderationHandler)
+	s.registerSubscriptionRoutes(v1, protected, subHandler, pkgHandler, webhookHandler)
 
 	// 7. Start Background Workers and Scheduler
 	if redisQueue != nil {
@@ -130,6 +177,9 @@ func (s *Server) registerRoutes() {
 	}
 
 	bgScheduler := scheduler.NewScheduler(verifyRepo, notifRepo, fileRepo, userRepo, store)
+	bgScheduler.SetSubscriptionProcessor(subService)
+	bgScheduler.SetLogArchiver(logArchiver)
+	bgScheduler.SetWebhookEventRepo(webhookEventRepo)
 	bgScheduler.Start()
 }
 

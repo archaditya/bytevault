@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
+	"github.com/archaditya/bytevault/internal/notification/email"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
 	"golang.org/x/crypto/bcrypt"
@@ -381,4 +382,89 @@ func (s *NotificationService) SendAdminNotification(
 	}
 
 	return sentCount, notificationIDs, nil
+}
+
+// NotifySubscription dispatches across in-app, push, and transactional email for subscription events.
+func (s *NotificationService) NotifySubscription(ctx context.Context, userID, title, body, notifType string) error {
+	notif := &model.Notification{
+		UserID:  userID,
+		Type:    notifType,
+		Title:   title,
+		Body:    body,
+		Channel: "in_app",
+		Metadata: map[string]interface{}{
+			"type": notifType,
+		},
+	}
+	_ = s.notifRepo.Create(ctx, notif)
+
+	if s.queue != nil {
+		now := time.Now()
+
+		// 1. In-App Real-time alert
+		inAppJob := &queue.Job{
+			ID:        fmt.Sprintf("notif-inapp-%d", now.UnixNano()),
+			Type:      queue.JobTypeInApp,
+			UserID:    userID,
+			Priority:  queue.PriorityHigh,
+			CreatedAt: now,
+			Payload: map[string]any{
+				"type":  notifType,
+				"title": title,
+				"body":  body,
+			},
+		}
+		_ = s.queue.Enqueue(ctx, inAppJob)
+
+		// 2. Mobile/Browser Push alert
+		pushJob := &queue.Job{
+			ID:        fmt.Sprintf("notif-push-%d", now.UnixNano()),
+			Type:      queue.JobTypePush,
+			UserID:    userID,
+			Priority:  queue.PriorityHigh,
+			CreatedAt: now,
+			Payload: map[string]any{
+				"title": title,
+				"body":  body,
+			},
+		}
+		_ = s.queue.Enqueue(ctx, pushJob)
+
+		// 3. Email alert
+		// FIX #18: For subscription.charged, dedicated payment receipt email is already sent by RecordCharge
+		if s.userRepo != nil && notifType != "subscription.charged" {
+			user, err := s.userRepo.FindByID(ctx, userID)
+			if err == nil && user != nil && user.Email != "" {
+				userName := user.Email
+				if user.FirstName != nil && *user.FirstName != "" {
+					userName = *user.FirstName
+				}
+				htmlBody, renderErr := email.RenderNotification(
+					title,
+					fmt.Sprintf("Hi %s,", userName),
+					body,
+					"You received this notification regarding your ByteVault subscription.",
+				)
+				if renderErr != nil {
+					htmlBody = body
+				}
+
+				emailJob := &queue.Job{
+					ID:        fmt.Sprintf("notif-email-%d", now.UnixNano()),
+					Type:      queue.JobTypeEmail,
+					UserID:    userID,
+					Priority:  queue.PriorityHigh,
+					CreatedAt: now,
+					Payload: map[string]any{
+						"to_email":  user.Email,
+						"to_name":   userName,
+						"subject":   "ByteVault: " + title,
+						"html_body": htmlBody,
+					},
+				}
+				_ = s.queue.Enqueue(ctx, emailJob)
+			}
+		}
+	}
+	return nil
 }

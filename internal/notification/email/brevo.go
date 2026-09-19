@@ -30,8 +30,24 @@ type EmailData struct {
 	Message  string
 	OTP      string
 	OTPColor string
-	Body     string
+	Body     template.HTML
 	Footer   string
+}
+
+// RenderNotification renders the unified template.html with the provided fields.
+// body is passed as template.HTML to preserve rich markup (buttons, styled boxes).
+func RenderNotification(heading, message, body, footer string) (string, error) {
+	var buf bytes.Buffer
+	err := emailTmpl.Execute(&buf, EmailData{
+		Heading: heading,
+		Message: message,
+		Body:    template.HTML(body),
+		Footer:  footer,
+	})
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // BrevoClient sends transactional emails via Brevo (Sendinblue) REST API v3.
@@ -71,12 +87,12 @@ func (b *BrevoClient) SendOTP(ctx context.Context, toEmail, toName, otp string) 
 	var buf bytes.Buffer
 	emailTmpl.Execute(&buf, EmailData{
 		Heading:  "Verify your email",
-		Message:  fmt.Sprintf("Hi %s, use this code to verify your PushPort account:", toName),
+		Message:  fmt.Sprintf("Hi %s, use this code to verify your PushPortVault account:", toName),
 		OTP:      otp,
 		OTPColor: "#a78bfa",
 		Footer:   "This code expires in 10 minutes. If you didn't request this, ignore this email.",
 	})
-	return b.send(ctx, toEmail, toName, "PushPort — Verify your email", buf.String())
+	return b.send(ctx, toEmail, toName, "PushPortVault — Verify your email", buf.String())
 }
 
 
@@ -85,12 +101,12 @@ func (b *BrevoClient) SendPasswordReset(ctx context.Context, toEmail, toName, ot
 	var buf bytes.Buffer
 	emailTmpl.Execute(&buf, EmailData{
 		Heading:  "Reset your password",
-		Message:  fmt.Sprintf("Hi %s, use this code to reset your PushPort password:", toName),
+		Message:  fmt.Sprintf("Hi %s, use this code to reset your PushPortVault password:", toName),
 		OTP:      otp,
 		OTPColor: "#fbbf24",
 		Footer:   "This code expires in 10 minutes. If you didn't request this, ignore this email.",
 	})
-	return b.send(ctx, toEmail, toName, "PushPort — Reset your password", buf.String())
+	return b.send(ctx, toEmail, toName, "PushPortVault — Reset your password", buf.String())
 }
 
 // SendGeneric sends a general notification email.

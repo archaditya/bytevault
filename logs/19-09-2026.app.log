@@ -1,0 +1,270 @@
+{"level":"info","time":"2026-09-19T00:24:56Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T00:24:57Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T00:24:57Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T00:24:57Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"info","time":"2026-09-19T01:24:53Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T01:24:54Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T01:24:54Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T01:24:55Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"info","time":"2026-09-19T04:41:57Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T04:41:57Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T04:41:58Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T04:41:58Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"info","time":"2026-09-19T05:41:41Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T05:41:41Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T05:41:42Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T05:41:42Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"info","time":"2026-09-19T06:41:22Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T06:41:23Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T06:41:23Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T06:41:24Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"35.323974ms","time":"2026-09-19T07:02:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"232.236832ms","time":"2026-09-19T07:02:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"10.1868ms","time":"2026-09-19T07:02:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T07:05:35Z","caller":"/app/cmd/api/main.go:33","message":"Configuration loaded"}
+{"level":"info","time":"2026-09-19T07:05:35Z","caller":"/app/cmd/api/main.go:42","message":"Database connected"}
+{"level":"info","time":"2026-09-19T07:05:35Z","caller":"/app/cmd/api/main.go:49","message":"Migrations Completed."}
+{"level":"info","addr":"redis:6379","time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/queue/redis.go:83","message":"Redis connected"}
+{"level":"info","credentials_file":"/firebase.json","time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:61","message":"Firebase Admin initialized successfully"}
+{"level":"info","time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:98","message":"Notification workers started successfully"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","workers":2,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/media_worker.go:58","message":"🚀 Media & Security Workers started"}
+{"level":"info","port":"8080","env":"development","time":"2026-09-19T07:05:35Z","caller":"/app/internal/server/server.go:116","message":"🚀 PushPort server starting"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:05:35Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","time":"2026-09-19T07:05:50Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T07:05:50Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T07:05:52Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T07:05:52Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"5.541144ms","time":"2026-09-19T07:06:11Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"336.375506ms","time":"2026-09-19T07:06:44Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"19.29531ms","time":"2026-09-19T07:06:49Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"17.337754ms","time":"2026-09-19T07:07:15Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"5.418711ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"145.243692ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"124.754445ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"164.303527ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"198.93058ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"22.075693ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"261.908381ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"70.69381ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"319.615589ms","time":"2026-09-19T07:07:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"31.978132ms","time":"2026-09-19T07:07:41Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"87.642108ms","time":"2026-09-19T07:07:42Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"109.255539ms","time":"2026-09-19T07:07:42Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"128.042805ms","time":"2026-09-19T07:07:42Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"170.827621ms","time":"2026-09-19T07:07:42Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"230.191306ms","time":"2026-09-19T07:07:42Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"42.637251ms","time":"2026-09-19T07:07:42Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"253.889404ms","time":"2026-09-19T07:07:43Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"594.837075ms","time":"2026-09-19T07:07:43Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814/download","ip":"172.18.0.1","latency":"121.050663ms","time":"2026-09-19T07:08:01Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"274.274533ms","time":"2026-09-19T07:14:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"273.571132ms","time":"2026-09-19T07:14:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"289.292004ms","time":"2026-09-19T07:14:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"5.073631ms","time":"2026-09-19T07:17:45Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"555.396µs","time":"2026-09-19T07:18:05Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"138.789368ms","time":"2026-09-19T07:19:20Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"117.793325ms","time":"2026-09-19T07:19:20Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"578.611454ms","time":"2026-09-19T07:19:21Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"1.239340694s","time":"2026-09-19T07:19:22Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"448.842705ms","time":"2026-09-19T07:19:28Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"448.691864ms","time":"2026-09-19T07:19:28Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"HEAD","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"13.832647ms","time":"2026-09-19T07:22:01Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"HEAD","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"2.988978ms","time":"2026-09-19T07:24:17Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"HEAD","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"2.976582ms","time":"2026-09-19T07:24:30Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"12.288811ms","time":"2026-09-19T07:25:14Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T07:26:35Z","caller":"/app/cmd/api/main.go:33","message":"Configuration loaded"}
+{"level":"info","time":"2026-09-19T07:26:36Z","caller":"/app/cmd/api/main.go:42","message":"Database connected"}
+{"level":"info","time":"2026-09-19T07:26:36Z","caller":"/app/cmd/api/main.go:49","message":"Migrations Completed."}
+{"level":"info","addr":"redis:6379","time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/queue/redis.go:83","message":"Redis connected"}
+{"level":"info","credentials_file":"/firebase.json","time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:61","message":"Firebase Admin initialized successfully"}
+{"level":"info","time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:98","message":"Notification workers started successfully"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","workers":2,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/media_worker.go:58","message":"🚀 Media & Security Workers started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:26:36Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","port":"8080","env":"development","time":"2026-09-19T07:26:36Z","caller":"/app/internal/server/server.go:116","message":"🚀 PushPort server starting"}
+{"level":"warn","status":401,"method":"HEAD","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814/download","ip":"172.18.0.1","latency":"4.918327ms","time":"2026-09-19T07:26:45Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T07:26:51Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T07:26:54Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T07:27:04Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T07:27:05Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814/download","ip":"172.18.0.1","latency":"1.664805ms","time":"2026-09-19T07:27:09Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T07:27:26Z","caller":"/app/cmd/api/main.go:33","message":"Configuration loaded"}
+{"level":"info","time":"2026-09-19T07:27:27Z","caller":"/app/cmd/api/main.go:42","message":"Database connected"}
+{"level":"info","time":"2026-09-19T07:27:27Z","caller":"/app/cmd/api/main.go:49","message":"Migrations Completed."}
+{"level":"info","addr":"redis:6379","time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/queue/redis.go:83","message":"Redis connected"}
+{"level":"info","credentials_file":"/firebase.json","time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:61","message":"Firebase Admin initialized successfully"}
+{"level":"info","time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:98","message":"Notification workers started successfully"}
+{"level":"info","workers":2,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/media_worker.go:58","message":"🚀 Media & Security Workers started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:27:27Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","port":"8080","env":"development","time":"2026-09-19T07:27:27Z","caller":"/app/internal/server/server.go:116","message":"🚀 PushPort server starting"}
+{"level":"info","time":"2026-09-19T07:27:42Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T07:27:42Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T07:27:44Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T07:27:44Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"info","time":"2026-09-19T07:28:38Z","caller":"/app/cmd/api/main.go:33","message":"Configuration loaded"}
+{"level":"info","time":"2026-09-19T07:28:39Z","caller":"/app/cmd/api/main.go:42","message":"Database connected"}
+{"level":"info","time":"2026-09-19T07:28:39Z","caller":"/app/cmd/api/main.go:49","message":"Migrations Completed."}
+{"level":"info","addr":"redis:6379","time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/queue/redis.go:83","message":"Redis connected"}
+{"level":"info","credentials_file":"/firebase.json","time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:61","message":"Firebase Admin initialized successfully"}
+{"level":"info","time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:98","message":"Notification workers started successfully"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","workers":2,"time":"2026-09-19T07:28:39Z","caller":"/app/internal/notification/worker/media_worker.go:58","message":"🚀 Media & Security Workers started"}
+{"level":"info","port":"8080","env":"development","time":"2026-09-19T07:28:39Z","caller":"/app/internal/server/server.go:116","message":"🚀 PushPort server starting"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"145.92686ms","time":"2026-09-19T07:28:46Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"56.147411ms","time":"2026-09-19T07:28:46Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"42.876366ms","time":"2026-09-19T07:28:46Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"82.574231ms","time":"2026-09-19T07:28:46Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"129.530042ms","time":"2026-09-19T07:28:46Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"217.941026ms","time":"2026-09-19T07:28:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"206.862924ms","time":"2026-09-19T07:28:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"41.424478ms","time":"2026-09-19T07:28:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"11.778878ms","time":"2026-09-19T07:28:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODk4MDMyNjIsImlhdCI6MTc4OTgwMjM2MiwicGVybWlzc2lvbnMiOnsiYWRtaW46YWN0aXZpdHkiOmZhbHNlLCJhZG1pbjpyb2xlcyI6ZmFsc2UsImFkbWluOnNlc3Npb25zIjpmYWxzZSwiYWRtaW46dXNlcnMiOmZhbHNlLCJmaWxlOmRlbGV0ZSI6dHJ1ZSwiZmlsZTpyZWFkIjp0cnVlLCJmaWxlOndyaXRlIjp0cnVlLCJ1c2VyOmRlbGV0ZSI6ZmFsc2UsInVzZXI6cmVhZCI6dHJ1ZSwidXNlcjp3cml0ZSI6dHJ1ZX0sInJvbGUiOiJ1c2VyIiwic3ViIjoiNTM0ZGM0YzgtNjRhNC00ODE2LThkYmQtODhkYzAxOTZmMjE2In0.oiLGC1YRfO1tkmTwNH2afMyCr13JiLUf5UksTMJaxwc","ip":"172.18.0.1","latency":"18.410284ms","time":"2026-09-19T07:28:52Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T07:28:54Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T07:28:54Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T07:28:55Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T07:28:55Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"288.463462ms","time":"2026-09-19T07:47:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"3.157479353s","time":"2026-09-19T07:47:51Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"104.512103ms","time":"2026-09-19T07:47:51Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"190.177788ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"207.230126ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"263.327047ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"303.84128ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"14.292652ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"428.798932ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"40.730138ms","time":"2026-09-19T07:47:54Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"7.696602ms","time":"2026-09-19T07:47:55Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"808.256µs","time":"2026-09-19T07:47:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"86.39139ms","time":"2026-09-19T07:47:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"2.132077ms","time":"2026-09-19T07:47:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"4.844432ms","time":"2026-09-19T07:47:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"5.008192ms","time":"2026-09-19T07:47:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"1.302121ms","time":"2026-09-19T07:47:56Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/admin/subscriptions?limit=20&offset=0","ip":"172.18.0.1","latency":"121.322233ms","time":"2026-09-19T07:47:57Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/admin/transactions?limit=50&offset=0","ip":"172.18.0.1","latency":"114.664667ms","time":"2026-09-19T07:47:57Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/admin/system-logs?limit=50&offset=0","ip":"172.18.0.1","latency":"85.99746ms","time":"2026-09-19T07:47:57Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/admin/subscription-logs?limit=50&offset=0","ip":"172.18.0.1","latency":"111.787487ms","time":"2026-09-19T07:47:57Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"99.689336ms","time":"2026-09-19T07:47:57Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814","ip":"172.18.0.1","latency":"723.997997ms","time":"2026-09-19T08:00:11Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"1.603803031s","time":"2026-09-19T08:00:43Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"698.39431ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"622.872502ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"682.509415ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"63.718888ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"832.785275ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"903.630362ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"19.72291ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"978.584447ms","time":"2026-09-19T08:00:47Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"275.779016ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"56.883962ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"89.952389ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"61.299178ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"117.101534ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"61.947921ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"12.41112ms","time":"2026-09-19T08:02:02Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"212.575887ms","time":"2026-09-19T08:02:03Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"334.969093ms","time":"2026-09-19T08:02:03Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODk4MDQ5NzAsImlhdCI6MTc4OTgwNDA3MCwicGVybWlzc2lvbnMiOnsiYWRtaW46YWN0aXZpdHkiOmZhbHNlLCJhZG1pbjpyb2xlcyI6ZmFsc2UsImFkbWluOnNlc3Npb25zIjpmYWxzZSwiYWRtaW46dXNlcnMiOmZhbHNlLCJmaWxlOmRlbGV0ZSI6dHJ1ZSwiZmlsZTpyZWFkIjp0cnVlLCJmaWxlOndyaXRlIjp0cnVlLCJ1c2VyOmRlbGV0ZSI6ZmFsc2UsInVzZXI6cmVhZCI6dHJ1ZSwidXNlcjp3cml0ZSI6dHJ1ZX0sInJvbGUiOiJ1c2VyIiwic3ViIjoiNTM0ZGM0YzgtNjRhNC00ODE2LThkYmQtODhkYzAxOTZmMjE2In0.-zm-HmjMiB19_HIOvc8FSa0Ih0uFzECRMnDn9qBaCoM","ip":"172.18.0.1","latency":"32.113554ms","time":"2026-09-19T08:02:33Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/invoices/f7f154a5-ccbf-43bb-9f17-76afa751d814?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODk4MDQ5NzAsImlhdCI6MTc4OTgwNDA3MCwicGVybWlzc2lvbnMiOnsiYWRtaW46YWN0aXZpdHkiOmZhbHNlLCJhZG1pbjpyb2xlcyI6ZmFsc2UsImFkbWluOnNlc3Npb25zIjpmYWxzZSwiYWRtaW46dXNlcnMiOmZhbHNlLCJmaWxlOmRlbGV0ZSI6dHJ1ZSwiZmlsZTpyZWFkIjp0cnVlLCJmaWxlOndyaXRlIjp0cnVlLCJ1c2VyOmRlbGV0ZSI6ZmFsc2UsInVzZXI6cmVhZCI6dHJ1ZSwidXNlcjp3cml0ZSI6dHJ1ZX0sInJvbGUiOiJ1c2VyIiwic3ViIjoiNTM0ZGM0YzgtNjRhNC00ODE2LThkYmQtODhkYzAxOTZmMjE2In0.-zm-HmjMiB19_HIOvc8FSa0Ih0uFzECRMnDn9qBaCoM","ip":"172.18.0.1","latency":"6.963673ms","time":"2026-09-19T08:02:43Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T08:28:09Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T08:28:09Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T08:28:10Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T08:28:10Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"45.536883ms","time":"2026-09-19T08:30:23Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"744.586832ms","time":"2026-09-19T08:30:24Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"16.352331ms","time":"2026-09-19T08:30:24Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"192.264358ms","time":"2026-09-19T08:30:24Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"180.882032ms","time":"2026-09-19T08:30:24Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"41.855971ms","time":"2026-09-19T08:30:24Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"52.743469ms","time":"2026-09-19T08:30:24Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"57.405982ms","time":"2026-09-19T08:30:25Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"22.709559ms","time":"2026-09-19T08:30:25Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"294.197414ms","time":"2026-09-19T08:30:25Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"566.791981ms","time":"2026-09-19T08:30:25Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"377.324298ms","time":"2026-09-19T08:33:13Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/transactions?limit=20&offset=0","ip":"172.18.0.1","latency":"365.725752ms","time":"2026-09-19T08:33:13Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"627.7773ms","time":"2026-09-19T08:33:14Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"33.388037ms","time":"2026-09-19T08:56:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"200.028321ms","time":"2026-09-19T08:56:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"161.244981ms","time":"2026-09-19T08:56:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"55.364546ms","time":"2026-09-19T08:56:29Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"239.706859ms","time":"2026-09-19T09:04:31Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T09:31:08Z","caller":"/app/cmd/api/main.go:33","message":"Configuration loaded"}
+{"level":"info","time":"2026-09-19T09:31:08Z","caller":"/app/cmd/api/main.go:42","message":"Database connected"}
+{"level":"info","time":"2026-09-19T09:31:08Z","caller":"/app/cmd/api/main.go:49","message":"Migrations Completed."}
+{"level":"info","addr":"redis:6379","time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/queue/redis.go:83","message":"Redis connected"}
+{"level":"info","credentials_file":"/firebase.json","time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:61","message":"Firebase Admin initialized successfully"}
+{"level":"info","worker_id":1,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:98","message":"Notification workers started successfully"}
+{"level":"info","worker_id":2,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","workers":2,"time":"2026-09-19T09:31:08Z","caller":"/app/internal/notification/worker/media_worker.go:58","message":"🚀 Media & Security Workers started"}
+{"level":"info","port":"8080","env":"development","time":"2026-09-19T09:31:08Z","caller":"/app/internal/server/server.go:116","message":"🚀 PushPort server starting"}
+{"level":"info","time":"2026-09-19T09:31:23Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T09:31:23Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T09:31:24Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T09:31:24Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}
+{"level":"warn","status":401,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"291.382µs","time":"2026-09-19T09:31:31Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"POST","uri":"/api/v1/auth/refresh","ip":"172.18.0.1","latency":"31.975956ms","time":"2026-09-19T09:31:31Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"2.03731ms","time":"2026-09-19T09:31:31Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"28.071368ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"45.623706ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"15.336473ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"17.339319ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"3.89583ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=1000","ip":"172.18.0.1","latency":"8.738216ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?sort_by=date&sort_dir=desc&limit=100","ip":"172.18.0.1","latency":"28.211391ms","time":"2026-09-19T09:32:06Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"14.704911ms","time":"2026-09-19T09:32:41Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"3.124676ms","time":"2026-09-19T09:32:41Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"583.60288ms","time":"2026-09-19T09:36:37Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me","ip":"172.18.0.1","latency":"3.194558ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/folders?flat=true","ip":"172.18.0.1","latency":"84.150677ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"213.606039ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/notifications","ip":"172.18.0.1","latency":"5.836131ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?sort_by=date&sort_dir=desc&limit=100","ip":"172.18.0.1","latency":"68.358714ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=1000","ip":"172.18.0.1","latency":"92.285225ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/files?limit=6","ip":"172.18.0.1","latency":"431.618158ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/me/quota","ip":"172.18.0.1","latency":"94.663584ms","time":"2026-09-19T09:36:38Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/packages","ip":"172.18.0.1","latency":"788.487247ms","time":"2026-09-19T09:44:27Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","status":200,"method":"GET","uri":"/api/v1/subscription/current","ip":"172.18.0.1","latency":"813.659392ms","time":"2026-09-19T09:44:27Z","caller":"/app/internal/server/server.go:70","message":"request"}
+{"level":"info","time":"2026-09-19T09:45:49Z","caller":"/app/cmd/api/main.go:33","message":"Configuration loaded"}
+{"level":"info","time":"2026-09-19T09:45:49Z","caller":"/app/cmd/api/main.go:42","message":"Database connected"}
+{"level":"info","time":"2026-09-19T09:45:49Z","caller":"/app/cmd/api/main.go:49","message":"Migrations Completed."}
+{"level":"info","addr":"redis:6379","time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/queue/redis.go:83","message":"Redis connected"}
+{"level":"info","credentials_file":"/firebase.json","time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:61","message":"Firebase Admin initialized successfully"}
+{"level":"info","time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:98","message":"Notification workers started successfully"}
+{"level":"info","worker_id":1,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","worker_id":1,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:203","message":"DB Writer worker started"}
+{"level":"info","workers":2,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/media_worker.go:58","message":"🚀 Media & Security Workers started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:153","message":"Push worker started"}
+{"level":"info","worker_id":2,"time":"2026-09-19T09:45:49Z","caller":"/app/internal/notification/worker/workers.go:107","message":"Email worker started"}
+{"level":"info","port":"8080","env":"development","time":"2026-09-19T09:45:50Z","caller":"/app/internal/server/server.go:116","message":"🚀 PushPort server starting"}
+{"level":"info","time":"2026-09-19T09:46:04Z","caller":"/app/internal/notification/scheduler/scheduler.go:87","message":"Scheduler running periodic cleanup tasks..."}
+{"level":"info","time":"2026-09-19T09:46:04Z","caller":"/app/internal/notification/scheduler/scheduler.go:140","message":"Scheduler running orphan file and image cleanup..."}
+{"level":"info","time":"2026-09-19T09:46:06Z","caller":"/app/internal/notification/scheduler/scheduler.go:198","message":"Processing scheduled subscription downgrades and expirations"}
+{"level":"info","time":"2026-09-19T09:46:06Z","caller":"/app/internal/notification/scheduler/scheduler.go:206","message":"Archiving past audit logs to storage"}

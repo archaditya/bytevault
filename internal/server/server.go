@@ -11,6 +11,7 @@ import (
 
 	"github.com/archaditya/bytevault/internal/config"
 	"github.com/archaditya/bytevault/internal/logger"
+	"github.com/archaditya/bytevault/internal/monitoring"
 )
 
 // Server holds the Echo instance and all dependencies.
@@ -33,6 +34,9 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(20))))
 
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		Skipper: func(c echo.Context) bool {
+			return c.Request().URL.Path == "/api/v1/health"
+		},
 		LogStatus:   true,
 		LogURI:      true,
 		LogMethod:   true,
@@ -40,6 +44,8 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 		LogError:    true,
 		LogRemoteIP: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			monitoring.GlobalTelemetry.Record(c.Path(), v.Status, v.Latency)
+
 			var event *zerolog.Event
 			if v.Status >= 500 {
 				event = logger.Log.Error()

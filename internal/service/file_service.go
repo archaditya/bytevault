@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	// DefaultQuotaBytes defines 1GB of storage quota per user
-	DefaultQuotaBytes = 1 * 1024 * 1024 * 1024
-	// MaxFileSizeLimit defines a 100MB limit for a single file upload
-	MaxFileSizeLimit = 100 * 1024 * 1024
+	// DefaultQuotaBytes defines 5GB of storage quota per free user
+	DefaultQuotaBytes = int64(5) * 1024 * 1024 * 1024
+	// MaxFileSizeLimit defines a 2GB limit for a single file upload
+	MaxFileSizeLimit = int64(2) * 1024 * 1024 * 1024
 )
 
 // Whitelisted allowed MIME types for storage (all developer, media, document, apple, and data formats)
@@ -148,6 +148,16 @@ type FileService struct {
 	redisQueue      *queue.RedisQueue
 	malwareScanner  security.MalwareScanner
 	activityRepo    *repository.ActivityRepository
+	subRepo         *repository.SubscriptionRepository
+	bandwidthRepo   *repository.BandwidthRepository
+}
+
+func (s *FileService) SetSubscriptionRepo(subRepo *repository.SubscriptionRepository) {
+	s.subRepo = subRepo
+}
+
+func (s *FileService) SetBandwidthRepo(bandwidthRepo *repository.BandwidthRepository) {
+	s.bandwidthRepo = bandwidthRepo
 }
 
 func NewFileService(
@@ -210,11 +220,27 @@ func (s *FileService) validateFile(ctx context.Context, userID string, size int6
 		return fmt.Errorf("failed to fetch user details: %w", err)
 	}
 
-	// 2. Per-user max file size validation
+	// Dynamic limits: Default to 5GB quota / 2GB max file size
+	totalLimit := int64(DefaultQuotaBytes)
 	maxFileSize := int64(MaxFileSizeLimit)
-	if user.MaxFileSizeBytes != nil {
+
+	// Check active subscription package tier
+	if s.subRepo != nil {
+		if sub, err := s.subRepo.FindByUserID(ctx, userID); err == nil && sub != nil && sub.Package != nil && sub.Status == "active" {
+			totalLimit = sub.Package.StorageLimitBytes
+			maxFileSize = sub.Package.MaxFileSizeBytes
+		}
+	}
+
+	// Custom admin override if higher
+	if user.StorageLimitBytes != nil && *user.StorageLimitBytes > totalLimit {
+		totalLimit = *user.StorageLimitBytes
+	}
+	if user.MaxFileSizeBytes != nil && *user.MaxFileSizeBytes > maxFileSize {
 		maxFileSize = *user.MaxFileSizeBytes
 	}
+
+	// 2. Per-user max file size validation
 	if size > maxFileSize {
 		return fmt.Errorf("file size (%d bytes) exceeds your maximum allowed file size limit of %d bytes", size, maxFileSize)
 	}
@@ -231,11 +257,6 @@ func (s *FileService) validateFile(ctx context.Context, userID string, size int6
 	used, err := s.repo.GetUserStorageUsed(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch user storage usage: %w", err)
-	}
-
-	totalLimit := int64(DefaultQuotaBytes)
-	if user.StorageLimitBytes != nil {
-		totalLimit = *user.StorageLimitBytes
 	}
 
 	if used+size > totalLimit {
@@ -445,6 +466,14 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		"file_size": file.FileSize,
 	})
 
+	if s.bandwidthRepo != nil {
+		go func(uID string, fID string, size int64) {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.bandwidthRepo.RecordEgress(bgCtx, &uID, &fID, size, "file_download", "")
+		}(userID, file.ID, file.FileSize)
+	}
+
 	return url, file, nil
 }
 
@@ -476,6 +505,14 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 	go func() {
 		_ = s.repo.IncrementDownloads(context.Background(), file.ID)
 	}()
+
+	if s.bandwidthRepo != nil {
+		go func(fID string, size int64) {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.bandwidthRepo.RecordEgress(bgCtx, nil, &fID, size, "public_share", "")
+		}(file.ID, file.FileSize)
+	}
 
 	return url, file, nil
 }

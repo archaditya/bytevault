@@ -57,6 +57,8 @@ services:
       NOTIFICATION_FIREBASE_CREDENTIALSFILE: /firebase.json
     volumes:
       - ./firebase.json:/firebase.json:ro
+      - ./logs:/app/logs
+      - ./public:/app/public:ro
     depends_on:
       postgres:
         condition: service_healthy
