@@ -268,9 +268,9 @@ func (h *SubscriptionHandler) DownloadInvoicePublic(c echo.Context) error {
 		return SendError(c, http.StatusNotFound, "invoice not found")
 	}
 
-	filename := fmt.Sprintf("PushPortVault-Invoice-%s.html", txnID)
+	filename := fmt.Sprintf("PushPostVault-Invoice-%s.html", txnID)
 	if txn.InvoiceNumber != nil && *txn.InvoiceNumber != "" {
-		filename = fmt.Sprintf("PushPortVault-Invoice-%s.html", *txn.InvoiceNumber)
+		filename = fmt.Sprintf("PushPostVault-Invoice-%s.html", *txn.InvoiceNumber)
 	}
 
 	c.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))

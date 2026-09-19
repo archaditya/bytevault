@@ -1,15 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tax Invoice {{.InvoiceNumber}} — PushPortVault</title>
+  <title>Tax Invoice {{.InvoiceNumber}} — PushPostVault</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
-  <link rel="icon" type="image/svg+xml" href="/static/logos/pushportvault-icon.svg">
+  <link rel="icon" type="image/svg+xml" href="/static/logos/PushPostVault-icon.svg">
   <link rel="shortcut icon" href="/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap"
+    rel="stylesheet">
   <style>
     :root {
       --primary: #4f46e5;
@@ -98,6 +101,7 @@
       border: 1px solid #334155;
       color: #f8fafc;
     }
+
     .btn-secondary:hover {
       background: #334155;
     }
@@ -107,6 +111,7 @@
       border: 1px solid #4338ca;
       color: #ffffff;
     }
+
     .btn-primary:hover {
       background: #4338ca;
     }
@@ -392,9 +397,11 @@
         padding: 0 !important;
         margin: 0 !important;
       }
+
       .no-print {
         display: none !important;
       }
+
       .invoice-canvas {
         box-shadow: none !important;
         border: none !important;
@@ -404,160 +411,167 @@
     }
   </style>
 </head>
+
 <body>
 
-<!-- Interactive Top Action Bar -->
-<div class="action-bar no-print">
-  <div class="action-bar-title">
-    <span>Tax Invoice</span>
-    <span>•</span>
-    <strong>{{.InvoiceNumber}}</strong>
+  <!-- Interactive Top Action Bar -->
+  <div class="action-bar no-print">
+    <div class="action-bar-title">
+      <span>Tax Invoice</span>
+      <span>•</span>
+      <strong>{{.InvoiceNumber}}</strong>
+    </div>
+    <div class="action-buttons">
+      <button onclick="window.print()" class="btn btn-secondary">
+        🖨️ Print / Save PDF
+      </button>
+      <a id="downloadLink" href="/api/v1/invoices/{{.TransactionID}}/download"
+        download="PushPostVault-Invoice-{{.InvoiceNumber}}.html" class="btn btn-primary">
+        📥 Download HTML
+      </a>
+    </div>
   </div>
-  <div class="action-buttons">
-    <button onclick="window.print()" class="btn btn-secondary">
-      🖨️ Print / Save PDF
-    </button>
-    <a id="downloadLink" href="/api/v1/invoices/{{.TransactionID}}/download" download="PushPortVault-Invoice-{{.InvoiceNumber}}.html" class="btn btn-primary">
-      📥 Download HTML
-    </a>
-  </div>
-</div>
 
-<!-- Authentic Tax Document Sheet -->
-<div class="invoice-canvas">
-  <!-- Document Header -->
-  <div class="inv-header">
-    <div class="brand-group">
-      <img src="/static/logos/pushportvault-logo.svg" 
-           alt="PushPortVault" 
-           class="brand-logo-img" 
-           onerror="this.src='/logos/pushportvault-logo.svg'; this.onerror=function(){this.src='/pushportvault-logo-2400.png'};">
-      <div class="company-sub">
-        <strong>PushPortVault Inc.</strong> • High-Performance Cloud Storage<br>
-        Web: pushportvault.dev • Support: support@pushportvault.dev<br>
-        GSTIN: 27AAACP9182M1Z5 • SAC: 998315
+  <!-- Authentic Tax Document Sheet -->
+  <div class="invoice-canvas">
+    <!-- Document Header -->
+    <div class="inv-header">
+      <div class="brand-group">
+        <img src="/static/logos/PushPostVault-logo.svg" alt="PushPostVault" class="brand-logo-img"
+          onerror="this.src='/logos/PushPostVault-logo.svg'; this.onerror=function(){this.src='/PushPostVault-logo-2400.png'};">
+        <div class="company-sub">
+          <strong>PushPostVault Inc.</strong> • High-Performance Cloud Storage<br>
+          Web: PushPostVault.dev • Support: support@PushPostVault.dev<br>
+          GSTIN: 27AAACP9182M1Z5 • SAC: 998315
+        </div>
+      </div>
+      <div class="inv-title-group">
+        <h1 class="inv-main-heading">TAX INVOICE</h1>
+        <div>
+          <span class="inv-badge-paid">{{.Status}}</span>
+        </div>
       </div>
     </div>
-    <div class="inv-title-group">
-      <h1 class="inv-main-heading">TAX INVOICE</h1>
-      <div>
-        <span class="inv-badge-paid">{{.Status}}</span>
+
+    <!-- Billed To & Payment Meta -->
+    <div class="meta-cards-grid">
+      <div class="meta-card">
+        <div class="meta-card-label">Billed To</div>
+        <div class="meta-card-name">{{.UserName}}</div>
+        <div class="meta-card-sub">{{.UserEmail}}</div>
+        <div class="meta-card-sub" style="margin-top: 6px; font-size: 11px; color: #64748b;">Place of Supply: India
+          (Registered User)</div>
+      </div>
+
+      <div class="meta-card">
+        <div class="meta-card-label">Invoice Details</div>
+        <table class="meta-data-table">
+          <tr>
+            <td style="color: #64748b;">Invoice No:</td>
+            <td>{{.InvoiceNumber}}</td>
+          </tr>
+          <tr>
+            <td style="color: #64748b;">Invoice Date:</td>
+            <td>{{.Date}}</td>
+          </tr>
+          {{if .PeriodStart}}
+          <tr>
+            <td style="color: #64748b;">Billing Period:</td>
+            <td>{{.PeriodStart}} — {{.PeriodEnd}}</td>
+          </tr>
+          {{end}}
+          {{if .PaymentID}}
+          <tr>
+            <td style="color: #64748b;">Payment Ref:</td>
+            <td>{{.PaymentID}}</td>
+          </tr>
+          {{end}}
+        </table>
       </div>
     </div>
-  </div>
 
-  <!-- Billed To & Payment Meta -->
-  <div class="meta-cards-grid">
-    <div class="meta-card">
-      <div class="meta-card-label">Billed To</div>
-      <div class="meta-card-name">{{.UserName}}</div>
-      <div class="meta-card-sub">{{.UserEmail}}</div>
-      <div class="meta-card-sub" style="margin-top: 6px; font-size: 11px; color: #64748b;">Place of Supply: India (Registered User)</div>
-    </div>
-
-    <div class="meta-card">
-      <div class="meta-card-label">Invoice Details</div>
-      <table class="meta-data-table">
-        <tr>
-          <td style="color: #64748b;">Invoice No:</td>
-          <td>{{.InvoiceNumber}}</td>
-        </tr>
-        <tr>
-          <td style="color: #64748b;">Invoice Date:</td>
-          <td>{{.Date}}</td>
-        </tr>
-        {{if .PeriodStart}}
-        <tr>
-          <td style="color: #64748b;">Billing Period:</td>
-          <td>{{.PeriodStart}} — {{.PeriodEnd}}</td>
-        </tr>
-        {{end}}
-        {{if .PaymentID}}
-        <tr>
-          <td style="color: #64748b;">Payment Ref:</td>
-          <td>{{.PaymentID}}</td>
-        </tr>
-        {{end}}
+    <!-- Itemized Invoice Table -->
+    <div class="inv-table-wrap">
+      <table class="inv-table">
+        <thead>
+          <tr>
+            <th style="width: 45%;">Service Description</th>
+            <th style="width: 15%;">SAC Code</th>
+            <th style="width: 15%;">Cycle</th>
+            <th style="width: 12%;" class="text-right">Rate</th>
+            <th style="width: 13%;" class="text-right">Amount (INR)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="item-title">PushPostVault {{.PackageName}} Tier Subscription</div>
+              <div class="item-desc">High-Speed Edge Storage: {{.StorageCap}} • Single Upload Limit: {{.MaxFileSize}} •
+                Parallel Multi-Part Transfer Engine</div>
+            </td>
+            <td><span class="code-tag">998315</span></td>
+            <td style="color: #475569; font-weight: 500;">{{.BillingPeriod}}</td>
+            <td class="text-right" style="font-family: 'JetBrains Mono', monospace;">₹{{.BaseAmount}}</td>
+            <td class="text-right" style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">₹{{.BaseAmount}}
+            </td>
+          </tr>
+        </tbody>
       </table>
     </div>
-  </div>
 
-  <!-- Itemized Invoice Table -->
-  <div class="inv-table-wrap">
-    <table class="inv-table">
-      <thead>
-        <tr>
-          <th style="width: 45%;">Service Description</th>
-          <th style="width: 15%;">SAC Code</th>
-          <th style="width: 15%;">Cycle</th>
-          <th style="width: 12%;" class="text-right">Rate</th>
-          <th style="width: 13%;" class="text-right">Amount (INR)</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>
-            <div class="item-title">PushPortVault {{.PackageName}} Tier Subscription</div>
-            <div class="item-desc">High-Speed Edge Storage: {{.StorageCap}} • Single Upload Limit: {{.MaxFileSize}} • Parallel Multi-Part Transfer Engine</div>
-          </td>
-          <td><span class="code-tag">998315</span></td>
-          <td style="color: #475569; font-weight: 500;">{{.BillingPeriod}}</td>
-          <td class="text-right" style="font-family: 'JetBrains Mono', monospace;">₹{{.BaseAmount}}</td>
-          <td class="text-right" style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">₹{{.BaseAmount}}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+    <!-- Totals Section -->
+    <div class="totals-wrapper">
+      <div class="compliance-notes">
+        <p><strong>Tax Summary Note:</strong><br>
+          Cloud hosting and storage services are categorized under SAC 998315 and taxed at standard 18.00% GST pursuant
+          to the Goods &amp; Services Tax Act.<br><br>
+          <strong>Payment Status:</strong> Captured &amp; verified via Razorpay Automated Billing Mandate.
+        </p>
+      </div>
 
-  <!-- Totals Section -->
-  <div class="totals-wrapper">
-    <div class="compliance-notes">
-      <p><strong>Tax Summary Note:</strong><br>
-      Cloud hosting and storage services are categorized under SAC 998315 and taxed at standard 18.00% GST pursuant to the Goods &amp; Services Tax Act.<br><br>
-      <strong>Payment Status:</strong> Captured &amp; verified via Razorpay Automated Billing Mandate.</p>
+      <div class="totals-card">
+        <div class="totals-row">
+          <span>Subtotal (Taxable Value):</span>
+          <span class="total-amount">₹{{.BaseAmount}}</span>
+        </div>
+        <div class="totals-row">
+          <span>GST ({{.GSTRate}}%):</span>
+          <span class="total-amount">₹{{.TaxAmount}}</span>
+        </div>
+        <div class="totals-row total-bold">
+          <span>Total Paid:</span>
+          <span class="total-amount">₹{{.TotalAmount}}</span>
+        </div>
+      </div>
     </div>
 
-    <div class="totals-card">
-      <div class="totals-row">
-        <span>Subtotal (Taxable Value):</span>
-        <span class="total-amount">₹{{.BaseAmount}}</span>
-      </div>
-      <div class="totals-row">
-        <span>GST ({{.GSTRate}}%):</span>
-        <span class="total-amount">₹{{.TaxAmount}}</span>
-      </div>
-      <div class="totals-row total-bold">
-        <span>Total Paid:</span>
-        <span class="total-amount">₹{{.TotalAmount}}</span>
-      </div>
+    <!-- Footer -->
+    <div class="inv-footer">
+      <p>This is an electronically generated tax invoice requiring no physical signature.<br>
+        Per <strong>PushPostVault Terms &amp; Conditions</strong>, subscriptions renew automatically unless cancelled
+        before the renewal date.<br>
+        Need help with your invoice? Reach us at <strong>support@PushPostVault.dev</strong></p>
     </div>
   </div>
 
-  <!-- Footer -->
-  <div class="inv-footer">
-    <p>This is an electronically generated tax invoice requiring no physical signature.<br>
-    Per <strong>PushPortVault Terms &amp; Conditions</strong>, subscriptions renew automatically unless cancelled before the renewal date.<br>
-    Need help with your invoice? Reach us at <strong>support@pushportvault.dev</strong></p>
-  </div>
-</div>
-
-<script>
-  // Forward JWT token if present in query params to the download link
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get('token');
-  if (token) {
-    const dl = document.getElementById('downloadLink');
-    if (dl) {
-      dl.href = '/api/v1/invoices/{{.TransactionID}}/download?token=' + encodeURIComponent(token);
+  <script>
+    // Forward JWT token if present in query params to the download link
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    if (token) {
+      const dl = document.getElementById('downloadLink');
+      if (dl) {
+        dl.href = '/api/v1/invoices/{{.TransactionID}}/download?token=' + encodeURIComponent(token);
+      }
     }
-  }
-  if (params.get('download') === '1') {
-    const target = token 
-      ? '/api/v1/invoices/{{.TransactionID}}/download?token=' + encodeURIComponent(token)
-      : '/api/v1/invoices/{{.TransactionID}}/download';
-    window.location.href = target;
-  }
-</script>
+    if (params.get('download') === '1') {
+      const target = token
+        ? '/api/v1/invoices/{{.TransactionID}}/download?token=' + encodeURIComponent(token)
+        : '/api/v1/invoices/{{.TransactionID}}/download';
+      window.location.href = target;
+    }
+  </script>
 
 </body>
+
 </html>
