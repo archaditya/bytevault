@@ -466,6 +466,11 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		"file_size": file.FileSize,
 	})
 
+	// Increment file downloads count asynchronously
+	go func(fID string) {
+		_ = s.repo.IncrementDownloads(context.Background(), fID)
+	}(file.ID)
+
 	if s.bandwidthRepo != nil {
 		go func(uID string, fID string, size int64) {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
