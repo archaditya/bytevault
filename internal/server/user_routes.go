@@ -23,6 +23,7 @@ func (s *Server) registerUserRoutes(
 	sessionRepo *repository.SessionRepository,
 	fileRepo *repository.FileRepository,
 	store storage.StorageProvider,
+	subRepo *repository.SubscriptionRepository,
 ) {
 	// Public user avatar endpoint proxy
 	v1.GET("/users/:id/avatar", func(c echo.Context) error {
@@ -219,12 +220,21 @@ func (s *Server) registerUserRoutes(
 		}
 
 		totalLimit := int64(service.DefaultQuotaBytes)
-		if user.StorageLimitBytes != nil {
-			totalLimit = *user.StorageLimitBytes
+		maxFileSize := int64(service.MaxFileSizeLimit)
+
+		// 1. If user has active subscription, resolve from its package tier
+		if subRepo != nil {
+			if sub, err := subRepo.FindByUserID(c.Request().Context(), userID); err == nil && sub != nil && sub.Package != nil && sub.Status == "active" {
+				totalLimit = sub.Package.StorageLimitBytes
+				maxFileSize = sub.Package.MaxFileSizeBytes
+			}
 		}
 
-		maxFileSize := int64(service.MaxFileSizeLimit)
-		if user.MaxFileSizeBytes != nil {
+		// 2. Custom admin override if higher than default/plan
+		if user.StorageLimitBytes != nil && *user.StorageLimitBytes > totalLimit {
+			totalLimit = *user.StorageLimitBytes
+		}
+		if user.MaxFileSizeBytes != nil && *user.MaxFileSizeBytes > maxFileSize {
 			maxFileSize = *user.MaxFileSizeBytes
 		}
 

@@ -15,9 +15,14 @@ import (
 )
 
 type EphemeralService struct {
-	repo        *repository.EphemeralShareRepository
-	settingRepo *repository.EphemeralSettingRepository
-	storage     storage.StorageProvider
+	repo          *repository.EphemeralShareRepository
+	settingRepo   *repository.EphemeralSettingRepository
+	storage       storage.StorageProvider
+	bandwidthRepo *repository.BandwidthRepository
+}
+
+func (s *EphemeralService) SetBandwidthRepo(repo *repository.BandwidthRepository) {
+	s.bandwidthRepo = repo
 }
 
 func NewEphemeralService(repo *repository.EphemeralShareRepository, settingRepo *repository.EphemeralSettingRepository, storage storage.StorageProvider) *EphemeralService {
@@ -275,6 +280,14 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 			defer cancel()
 			_ = s.storage.Delete(bgCtx, storageKey)
 		}(share.StorageKey)
+	}
+
+	if s.bandwidthRepo != nil {
+		go func(sID string, size int64) {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.bandwidthRepo.RecordEgress(bgCtx, nil, &sID, size, "instant_share", "")
+		}(share.ID, share.FileSize)
 	}
 
 	return downloadURL, nil

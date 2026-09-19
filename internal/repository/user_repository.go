@@ -291,6 +291,18 @@ func (r *UserRepository) UpdateDetails(ctx context.Context, id string, firstName
 	return err
 }
 
+func (r *UserRepository) UpdateStorageLimits(ctx context.Context, id string, storageLimitBytes, maxFileSizeBytes int64) error {
+	query := `
+		UPDATE users
+		SET storage_limit_bytes = $2,
+		    max_file_size_bytes = $3,
+		    updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	_, err := r.db.Exec(ctx, query, id, storageLimitBytes, maxFileSizeBytes)
+	return err
+}
+
 func (r *UserRepository) UpdatePassword(ctx context.Context, id string, hashedPassword string) error {
 	query := `UPDATE users SET password = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	_, err := r.db.Exec(ctx, query, id, hashedPassword)

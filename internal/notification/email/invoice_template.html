@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tax Invoice {{.InvoiceNumber}} — PushPortVault</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="/static/logos/pushportvault-icon.svg">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-400: #94a3b8;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --slate-50: #f8fafc;
+      --emerald-600: #059669;
+      --emerald-50: #ecfdf5;
+      --emerald-200: #a7f3d0;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #090d16;
+      color: var(--slate-900);
+      min-height: 100vh;
+      padding: 40px 20px 60px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Floating Action Bar */
+    .action-bar {
+      max-width: 820px;
+      width: 100%;
+      margin: 0 auto 24px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(18, 24, 38, 0.85);
+      backdrop-filter: blur(12px);
+      padding: 12px 20px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .action-bar-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .action-bar-title strong {
+      color: #f8fafc;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-secondary {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+    }
+    .btn-secondary:hover {
+      background: #334155;
+    }
+
+    .btn-primary {
+      background: #4f46e5;
+      border: 1px solid #4338ca;
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: #4338ca;
+    }
+
+    /* Modern A4 Document Canvas */
+    .invoice-canvas {
+      max-width: 820px;
+      width: 100%;
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 52px 56px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Top Accent Line */
+    .invoice-canvas::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, #4f46e5, #818cf8, #06b6d4);
+    }
+
+    /* Header Section */
+    .inv-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--slate-200);
+      margin-bottom: 32px;
+    }
+
+    .brand-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .brand-logo-img {
+      height: 38px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .company-sub {
+      font-size: 12px;
+      color: var(--slate-500);
+      line-height: 1.5;
+    }
+
+    .inv-title-group {
+      text-align: right;
+    }
+
+    .inv-main-heading {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: var(--slate-900);
+    }
+
+    .inv-badge-paid {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--emerald-50);
+      color: var(--emerald-600);
+      border: 1px solid var(--emerald-200);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-top: 8px;
+    }
+
+    .inv-badge-paid::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      background: var(--emerald-600);
+      border-radius: 50%;
+    }
+
+    /* 2-Column Meta Cards */
+    .meta-cards-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 36px;
+    }
+
+    .meta-card {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 12px;
+      padding: 18px 20px;
+    }
+
+    .meta-card-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--slate-500);
+      margin-bottom: 10px;
+    }
+
+    .meta-card-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--slate-900);
+      margin-bottom: 4px;
+    }
+
+    .meta-card-sub {
+      font-size: 13px;
+      color: var(--slate-600);
+      margin-bottom: 2px;
+    }
+
+    .meta-data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .meta-data-table td {
+      padding: 3px 0;
+    }
+
+    .meta-data-table td:last-child {
+      text-align: right;
+      font-weight: 600;
+      color: var(--slate-900);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Table */
+    .inv-table-wrap {
+      border: 1px solid var(--slate-200);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+
+    .inv-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    .inv-table thead {
+      background: var(--slate-50);
+      border-bottom: 1px solid var(--slate-200);
+    }
+
+    .inv-table th {
+      padding: 12px 18px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--slate-600);
+    }
+
+    .inv-table th.text-right,
+    .inv-table td.text-right {
+      text-align: right;
+    }
+
+    .inv-table tbody tr td {
+      padding: 18px 18px;
+      border-bottom: 1px solid var(--slate-200);
+      font-size: 14px;
+    }
+
+    .inv-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .item-title {
+      font-weight: 700;
+      color: var(--slate-900);
+      margin-bottom: 4px;
+    }
+
+    .item-desc {
+      font-size: 12px;
+      color: var(--slate-500);
+    }
+
+    .code-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--slate-600);
+      background: var(--slate-100);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* Totals Breakdown */
+    .totals-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 36px;
+      gap: 30px;
+    }
+
+    .compliance-notes {
+      flex: 1;
+      font-size: 12px;
+      color: var(--slate-500);
+      line-height: 1.6;
+      border-left: 2px solid var(--slate-200);
+      padding-left: 14px;
+    }
+
+    .compliance-notes strong {
+      color: var(--slate-700);
+    }
+
+    .totals-card {
+      width: 330px;
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+
+    .totals-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      padding: 6px 0;
+      color: var(--slate-600);
+    }
+
+    .totals-row.total-bold {
+      border-top: 1px solid var(--slate-200);
+      margin-top: 6px;
+      padding-top: 10px;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--slate-900);
+    }
+
+    .totals-row .total-amount {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+    }
+
+    .totals-row.total-bold .total-amount {
+      color: var(--primary);
+      font-size: 18px;
+    }
+
+    /* Footer */
+    .inv-footer {
+      border-top: 1px solid var(--slate-200);
+      padding-top: 24px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--slate-400);
+      line-height: 1.6;
+    }
+
+    .inv-footer strong {
+      color: var(--slate-600);
+    }
+
+    /* Print Overrides */
+    @media print {
+      body {
+        background: #ffffff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .invoice-canvas {
+        box-shadow: none !important;
+        border: none !important;
+        max-width: 100% !important;
+        padding: 30px !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Interactive Top Action Bar -->
+<div class="action-bar no-print">
+  <div class="action-bar-title">
+    <span>Tax Invoice</span>
+    <span>•</span>
+    <strong>{{.InvoiceNumber}}</strong>
+  </div>
+  <div class="action-buttons">
+    <button onclick="window.print()" class="btn btn-secondary">
+      🖨️ Print / Save PDF
+    </button>
+    <a id="downloadLink" href="/api/v1/invoices/{{.TransactionID}}/download" download="PushPortVault-Invoice-{{.InvoiceNumber}}.html" class="btn btn-primary">
+      📥 Download HTML
+    </a>
+  </div>
+</div>
+
+<!-- Authentic Tax Document Sheet -->
+<div class="invoice-canvas">
+  <!-- Document Header -->
+  <div class="inv-header">
+    <div class="brand-group">
+      <img src="/static/logos/pushportvault-logo.svg" 
+           alt="PushPortVault" 
+           class="brand-logo-img" 
+           onerror="this.src='/logos/pushportvault-logo.svg'; this.onerror=function(){this.src='/pushportvault-logo-2400.png'};">
+      <div class="company-sub">
+        <strong>PushPortVault Inc.</strong> • High-Performance Cloud Storage<br>
+        Web: pushportvault.dev • Support: support@pushportvault.dev<br>
+        GSTIN: 27AAACP9182M1Z5 • SAC: 998315
+      </div>
+    </div>
+    <div class="inv-title-group">
+      <h1 class="inv-main-heading">TAX INVOICE</h1>
+      <div>
+        <span class="inv-badge-paid">{{.Status}}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Billed To & Payment Meta -->
+  <div class="meta-cards-grid">
+    <div class="meta-card">
+      <div class="meta-card-label">Billed To</div>
+      <div class="meta-card-name">{{.UserName}}</div>
+      <div class="meta-card-sub">{{.UserEmail}}</div>
+      <div class="meta-card-sub" style="margin-top: 6px; font-size: 11px; color: #64748b;">Place of Supply: India (Registered User)</div>
+    </div>
+
+    <div class="meta-card">
+      <div class="meta-card-label">Invoice Details</div>
+      <table class="meta-data-table">
+        <tr>
+          <td style="color: #64748b;">Invoice No:</td>
+          <td>{{.InvoiceNumber}}</td>
+        </tr>
+        <tr>
+          <td style="color: #64748b;">Invoice Date:</td>
+          <td>{{.Date}}</td>
+        </tr>
+        {{if .PeriodStart}}
+        <tr>
+          <td style="color: #64748b;">Billing Period:</td>
+          <td>{{.PeriodStart}} — {{.PeriodEnd}}</td>
+        </tr>
+        {{end}}
+        {{if .PaymentID}}
+        <tr>
+          <td style="color: #64748b;">Payment Ref:</td>
+          <td>{{.PaymentID}}</td>
+        </tr>
+        {{end}}
+      </table>
+    </div>
+  </div>
+
+  <!-- Itemized Invoice Table -->
+  <div class="inv-table-wrap">
+    <table class="inv-table">
+      <thead>
+        <tr>
+          <th style="width: 45%;">Service Description</th>
+          <th style="width: 15%;">SAC Code</th>
+          <th style="width: 15%;">Cycle</th>
+          <th style="width: 12%;" class="text-right">Rate</th>
+          <th style="width: 13%;" class="text-right">Amount (INR)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="item-title">PushPortVault {{.PackageName}} Tier Subscription</div>
+            <div class="item-desc">High-Speed Edge Storage: {{.StorageCap}} • Single Upload Limit: {{.MaxFileSize}} • Parallel Multi-Part Transfer Engine</div>
+          </td>
+          <td><span class="code-tag">998315</span></td>
+          <td style="color: #475569; font-weight: 500;">{{.BillingPeriod}}</td>
+          <td class="text-right" style="font-family: 'JetBrains Mono', monospace;">₹{{.BaseAmount}}</td>
+          <td class="text-right" style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">₹{{.BaseAmount}}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Totals Section -->
+  <div class="totals-wrapper">
+    <div class="compliance-notes">
+      <p><strong>Tax Summary Note:</strong><br>
+      Cloud hosting and storage services are categorized under SAC 998315 and taxed at standard 18.00% GST pursuant to the Goods &amp; Services Tax Act.<br><br>
+      <strong>Payment Status:</strong> Captured &amp; verified via Razorpay Automated Billing Mandate.</p>
+    </div>
+
+    <div class="totals-card">
+      <div class="totals-row">
+        <span>Subtotal (Taxable Value):</span>
+        <span class="total-amount">₹{{.BaseAmount}}</span>
+      </div>
+      <div class="totals-row">
+        <span>GST ({{.GSTRate}}%):</span>
+        <span class="total-amount">₹{{.TaxAmount}}</span>
+      </div>
+      <div class="totals-row total-bold">
+        <span>Total Paid:</span>
+        <span class="total-amount">₹{{.TotalAmount}}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="inv-footer">
+    <p>This is an electronically generated tax invoice requiring no physical signature.<br>
+    Per <strong>PushPortVault Terms &amp; Conditions</strong>, subscriptions renew automatically unless cancelled before the renewal date.<br>
+    Need help with your invoice? Reach us at <strong>support@pushportvault.dev</strong></p>
+  </div>
+</div>
+
+<script>
+  // Forward JWT token if present in query params to the download link
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  if (token) {
+    const dl = document.getElementById('downloadLink');
+    if (dl) {
+      dl.href = '/api/v1/invoices/{{.TransactionID}}/download?token=' + encodeURIComponent(token);
+    }
+  }
+  if (params.get('download') === '1') {
+    const target = token 
+      ? '/api/v1/invoices/{{.TransactionID}}/download?token=' + encodeURIComponent(token)
+      : '/api/v1/invoices/{{.TransactionID}}/download';
+    window.location.href = target;
+  }
+</script>
+
+</body>
+</html>

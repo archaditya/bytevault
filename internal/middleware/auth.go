@@ -30,12 +30,21 @@ func Auth(authService *service.AuthService) echo.MiddlewareFunc {
 			}
 
 			if token == "" {
+				// Public invoice endpoints (e.g. from email links or shared receipts) can be accessed by UUID
+				reqPath := c.Request().URL.Path
+				if strings.HasPrefix(reqPath, "/api/v1/invoices") {
+					return next(c)
+				}
 				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Authorization header or token query parameter required"})
 			}
 
 			// ValidateAccessToken now returns userID, role, and permissions
 			claims, err := authService.ValidateAccessToken(token)
 			if err != nil {
+				reqPath := c.Request().URL.Path
+				if strings.HasPrefix(reqPath, "/api/v1/invoices") {
+					return next(c)
+				}
 				return c.JSON(http.StatusUnauthorized, map[string]any{"error": "Invalid or expired token"})
 			}
 

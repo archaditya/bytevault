@@ -3,18 +3,27 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/archaditya/bytevault/internal/model"
+	"github.com/archaditya/bytevault/internal/monitoring"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/service"
 )
 
 type AdminHandler struct {
-	userRepo     *repository.UserRepository
-	roleRepo     *repository.RoleRepository
-	sessionRepo  *repository.SessionRepository
-	activityRepo *repository.ActivityRepository
-	fileRepo     *repository.FileRepository
+	userRepo      *repository.UserRepository
+	roleRepo      *repository.RoleRepository
+	sessionRepo   *repository.SessionRepository
+	activityRepo  *repository.ActivityRepository
+	fileRepo      *repository.FileRepository
+	subRepo       *repository.SubscriptionRepository
+	subService    *service.SubscriptionService
+	bandwidthRepo *repository.BandwidthRepository
+	telemetry     *monitoring.TelemetryTracker
+	db            *pgxpool.Pool
 }
 
 func NewAdminHandler(
@@ -31,6 +40,17 @@ func NewAdminHandler(
 		activityRepo: activityRepo,
 		fileRepo:     fileRepo,
 	}
+}
+
+func (h *AdminHandler) SetSubscriptionDependencies(subRepo *repository.SubscriptionRepository, subService *service.SubscriptionService) {
+	h.subRepo = subRepo
+	h.subService = subService
+}
+
+func (h *AdminHandler) SetMonitoringDependencies(telemetry *monitoring.TelemetryTracker, bandwidthRepo *repository.BandwidthRepository, db *pgxpool.Pool) {
+	h.telemetry = telemetry
+	h.bandwidthRepo = bandwidthRepo
+	h.db = db
 }
 
 // Helper to get pointer to string
@@ -76,6 +96,19 @@ func (h *AdminHandler) ListUsers(c echo.Context) error {
 		if err == nil {
 			roleName = roleInfo.Name
 		}
+
+		pkgName := "Free"
+		subStatus := "none"
+		if h.subRepo != nil {
+			sub, err := h.subRepo.FindByUserID(c.Request().Context(), u.ID)
+			if err == nil && sub != nil {
+				if sub.Package != nil {
+					pkgName = sub.Package.DisplayName
+				}
+				subStatus = sub.Status
+			}
+		}
+
 		enriched = append(enriched, map[string]any{
 			"id":                  u.ID,
 			"email":               u.Email,
@@ -89,6 +122,8 @@ func (h *AdminHandler) ListUsers(c echo.Context) error {
 			"created_at":          u.CreatedAt,
 			"updated_at":          u.UpdatedAt,
 			"role":                roleName,
+			"package_name":        pkgName,
+			"subscription_status": subStatus,
 		})
 	}
 
@@ -147,22 +182,31 @@ func (h *AdminHandler) GetUserDetail(c echo.Context) error {
 
 	totalFiles, totalStorage, _ := h.userRepo.GetUserStorageStats(ctx, id)
 
+	var userSub *model.Subscription
+	if h.subRepo != nil {
+		sub, err := h.subRepo.FindByUserID(ctx, id)
+		if err == nil {
+			userSub = sub
+		}
+	}
+
 	return SendSuccess(c, http.StatusOK, map[string]any{
 		"user": map[string]any{
-			"id":          u.ID,
-			"email":       u.Email,
-			"first_name":  u.FirstName,
-			"last_name":   u.LastName,
-			"avatar_url":  u.AvatarURL,
-			"is_verified": u.IsVerified,
-			"status":      u.Status,
+			"id":                  u.ID,
+			"email":               u.Email,
+			"first_name":          u.FirstName,
+			"last_name":           u.LastName,
+			"avatar_url":          u.AvatarURL,
+			"is_verified":         u.IsVerified,
+			"status":              u.Status,
 			"storage_limit_bytes": u.StorageLimitBytes,
 			"max_file_size_bytes": u.MaxFileSizeBytes,
-			"created_at":  u.CreatedAt,
-			"updated_at":  u.UpdatedAt,
-			"role":        roleName,
-			"role_id":     roleID,
+			"created_at":          u.CreatedAt,
+			"updated_at":          u.UpdatedAt,
+			"role":                roleName,
+			"role_id":             roleID,
 		},
+		"subscription":  userSub,
 		"total_files":   totalFiles,
 		"total_storage": totalStorage,
 	}, nil)
@@ -220,6 +264,21 @@ func (h *AdminHandler) DeleteUser(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, "You cannot delete your own account")
 	}
 
+	// 1. Invalidate all active sessions immediately so user is logged out everywhere
+	if h.sessionRepo != nil {
+		_ = h.sessionRepo.DeleteAllByUserID(ctx, id)
+	}
+
+	// 2. Cascade cancellation: cancel active subscription on Razorpay immediately and reset limits
+	if h.subRepo != nil && h.subService != nil {
+		sub, err := h.subRepo.FindByUserID(ctx, id)
+		if err == nil && sub != nil && sub.IsActive() {
+			_ = h.subService.AdminCancel(ctx, sub.ID)
+		}
+	}
+
+	// 3. Soft-delete user row (deleted_at IS NOT NULL blocks any future login/tokens)
+	// User files are retained for 30-day grace period before being purged from R2 by scheduler
 	err := h.userRepo.SoftDelete(ctx, id, actorID)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, "Failed to delete user")
@@ -232,7 +291,9 @@ func (h *AdminHandler) DeleteUser(c echo.Context) error {
 		ResourceID:   &id,
 	})
 
-	return SendSuccess(c, http.StatusOK, map[string]string{"message": "User deleted successfully"}, nil)
+	return SendSuccess(c, http.StatusOK, map[string]string{
+		"message": "User deleted successfully. Active sessions revoked, subscription cancelled, and data entered 30-day grace retention.",
+	}, nil)
 }
 
 // GET /api/v1/admin/roles
@@ -307,3 +368,42 @@ func (h *AdminHandler) ListSharedFiles(c echo.Context) error {
 		Limit: limit, NextCursor: nextCursor,
 	})
 }
+
+// GET /api/v1/admin/telemetry
+func (h *AdminHandler) GetTelemetry(c echo.Context) error {
+	if h.telemetry == nil {
+		return SendError(c, http.StatusServiceUnavailable, "Telemetry tracker is not configured")
+	}
+	snapshot := h.telemetry.GetSnapshot(h.db)
+	return SendSuccess(c, http.StatusOK, snapshot, nil)
+}
+
+// GET /api/v1/admin/bandwidth
+func (h *AdminHandler) GetBandwidth(c echo.Context) error {
+	if h.bandwidthRepo == nil {
+		return SendError(c, http.StatusServiceUnavailable, "Bandwidth repository is not configured")
+	}
+
+	timeframe := c.QueryParam("timeframe")
+	now := time.Now().UTC()
+	var since time.Time
+
+	switch timeframe {
+	case "today":
+		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	case "7d":
+		since = now.AddDate(0, 0, -7)
+	case "30d":
+		since = now.AddDate(0, 0, -30)
+	default: // "24h"
+		since = now.Add(-24 * time.Hour)
+	}
+
+	summary, err := h.bandwidthRepo.GetEgressSummary(c.Request().Context(), since)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to retrieve bandwidth summary")
+	}
+
+	return SendSuccess(c, http.StatusOK, summary, nil)
+}
+

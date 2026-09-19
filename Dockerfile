@@ -23,6 +23,7 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates curl ffmpeg poppler-utils
 
 COPY --from=builder /app/bytevault .
+COPY public ./public
 
 EXPOSE 8080
 

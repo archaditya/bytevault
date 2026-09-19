@@ -9,11 +9,14 @@ func (s *Server) registerAdminRoutes(
 	protected *Group,
 	adminHandler *handler.AdminHandler,
 	moderationHandler *handler.ModerationHandler,
+	pkgHandler *handler.PackageHandler,
 ) {
 	admin := protected.Group("/admin")
 
-	// Stats
+	// Stats & Vitals
 	admin.GET("/stats", adminHandler.GetStats, appMiddleware.RequirePermission("admin:users"))
+	admin.GET("/telemetry", adminHandler.GetTelemetry, appMiddleware.RequirePermission("admin:users"))
+	admin.GET("/bandwidth", adminHandler.GetBandwidth, appMiddleware.RequirePermission("admin:users"))
 
 	// Users Management
 	admin.GET("/users", adminHandler.ListUsers, appMiddleware.RequirePermission("admin:users"))
@@ -44,5 +47,20 @@ func (s *Server) registerAdminRoutes(
 		moderation.GET("/appeals", moderationHandler.ListAppeals)
 		moderation.POST("/appeals/:id/approve", moderationHandler.ApproveAppeal)
 		moderation.POST("/appeals/:id/reject", moderationHandler.RejectAppeal)
+	}
+
+	// Subscription & Package Management
+	if pkgHandler != nil {
+		admin.POST("/packages", pkgHandler.AdminCreatePackage, appMiddleware.RequirePermission("admin:users"))
+		admin.PUT("/packages/:id", pkgHandler.AdminUpdatePackage, appMiddleware.RequirePermission("admin:users"))
+		admin.DELETE("/packages/:id", pkgHandler.AdminDeletePackage, appMiddleware.RequirePermission("admin:users"))
+
+		admin.GET("/subscriptions", pkgHandler.AdminListSubscriptions, appMiddleware.RequirePermission("admin:users"))
+		admin.POST("/subscriptions/:id/cancel", pkgHandler.AdminCancelSubscription, appMiddleware.RequirePermission("admin:users"))
+		admin.POST("/users/:id/assign-subscription", pkgHandler.AdminAssignSubscription, appMiddleware.RequirePermission("admin:users"))
+
+		admin.GET("/transactions", pkgHandler.AdminListTransactions, appMiddleware.RequirePermission("admin:users"))
+		admin.GET("/subscription-logs", pkgHandler.AdminListAuditLogs, appMiddleware.RequirePermission("admin:users"))
+		admin.GET("/system-logs", pkgHandler.AdminListSystemLogs, appMiddleware.RequirePermission("admin:users"))
 	}
 }

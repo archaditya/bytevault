@@ -9,15 +9,27 @@ import (
 	"github.com/archaditya/bytevault/internal/storage"
 )
 
+type SubscriptionProcessor interface {
+	ProcessScheduledDowngrades(ctx context.Context) error
+}
+
+type LogArchiver interface {
+	ArchivePastLogs(ctx context.Context) error
+	PurgeExpiredLogs(ctx context.Context) error
+}
+
 type Scheduler struct {
-	verifyRepo *repository.EmailVerificationRepository
-	notifRepo  *repository.NotificationRepository
-	fileRepo   *repository.FileRepository
-	userRepo   *repository.UserRepository
-	store      storage.StorageProvider
-	ticker     *time.Ticker
-	ctx        context.Context
-	cancel     context.CancelFunc
+	verifyRepo       *repository.EmailVerificationRepository
+	notifRepo        *repository.NotificationRepository
+	fileRepo         *repository.FileRepository
+	userRepo         *repository.UserRepository
+	store            storage.StorageProvider
+	subProcessor     SubscriptionProcessor
+	logArchiver      LogArchiver
+	webhookEventRepo *repository.WebhookEventRepository
+	ticker           *time.Ticker
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
 func NewScheduler(
@@ -40,13 +52,13 @@ func NewScheduler(
 }
 
 func (s *Scheduler) Start() {
-	s.ticker = time.NewTicker(24 * time.Hour)
+	// FIX #10: Run maintenance hourly, with an initial run after 15s warmup instead of 24h delay
+	s.ticker = time.NewTicker(1 * time.Hour)
 	go func() {
-		// Wait for 24 hours on startup before running cleanups to let the system stabilize
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-time.After(24 * time.Hour):
+		case <-time.After(15 * time.Second):
 			s.cleanup()
 		}
 
@@ -180,4 +192,46 @@ func (s *Scheduler) cleanupOrphans(ctx context.Context) {
 			}
 		}
 	}
+
+	// 3. Process subscription downgrades and cycle expirations
+	if s.subProcessor != nil {
+		logger.Log.Info().Msg("Processing scheduled subscription downgrades and expirations")
+		if err := s.subProcessor.ProcessScheduledDowngrades(ctx); err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to process scheduled subscription downgrades")
+		}
+	}
+
+	// 4. Archive closed daily audit logs to cloud storage and purge logs older than 6 months
+	if s.logArchiver != nil {
+		logger.Log.Info().Msg("Archiving past audit logs to storage")
+		if err := s.logArchiver.ArchivePastLogs(ctx); err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to archive audit logs")
+		}
+		if err := s.logArchiver.PurgeExpiredLogs(ctx); err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to purge expired logs from R2")
+		}
+	}
+
+	// 5. Cleanup processed webhook events older than 7 days
+	if s.webhookEventRepo != nil {
+		webhookCutoff := time.Now().Add(-7 * 24 * time.Hour)
+		deletedEvents, err := s.webhookEventRepo.CleanupOlderThan(ctx, webhookCutoff)
+		if err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to cleanup old webhook events")
+		} else if deletedEvents > 0 {
+			logger.Log.Info().Int64("deleted", deletedEvents).Msg("Cleaned old webhook idempotency events")
+		}
+	}
+}
+
+func (s *Scheduler) SetSubscriptionProcessor(p SubscriptionProcessor) {
+	s.subProcessor = p
+}
+
+func (s *Scheduler) SetLogArchiver(a LogArchiver) {
+	s.logArchiver = a
+}
+
+func (s *Scheduler) SetWebhookEventRepo(r *repository.WebhookEventRepository) {
+	s.webhookEventRepo = r
 }

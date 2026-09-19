@@ -19,6 +19,14 @@ type Config struct {
 	Redis        RedisConfig        `koanf:"redis"`
 	Notification NotificationConfig `koanf:"notification"`
 	AI           AIConfig           `koanf:"ai"`
+	Razorpay     RazorpayConfig     `koanf:"razorpay"`
+}
+
+// RazorpayConfig holds API keys and webhook secret for Razorpay billing.
+type RazorpayConfig struct {
+	KeyID         string `koanf:"keyid"`
+	KeySecret     string `koanf:"keysecret"`
+	WebhookSecret string `koanf:"webhooksecret"`
 }
 
 // AIConfig holds credentials for AI image labeling providers.
@@ -124,6 +132,9 @@ func Load() (*Config, error) {
 		}
 		if strings.HasPrefix(s, "ai_") {
 			return "ai." + strings.Replace(s[len("ai_"):], "_", "", -1)
+		}
+		if strings.HasPrefix(s, "razorpay_") {
+			return "razorpay." + strings.Replace(s[len("razorpay_"):], "_", "", -1)
 		}
 		parts := strings.SplitN(s, "_", 2)
 		if len(parts) == 2 {
