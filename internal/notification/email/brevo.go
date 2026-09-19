@@ -32,6 +32,8 @@ type EmailData struct {
 	OTPColor string
 	Body     template.HTML
 	Footer   string
+	LogoURL  string
+	AppURL   string
 }
 
 // RenderNotification renders the unified template.html with the provided fields.
@@ -43,6 +45,8 @@ func RenderNotification(heading, message, body, footer string) (string, error) {
 		Message: message,
 		Body:    template.HTML(body),
 		Footer:  footer,
+		LogoURL: "https://pushpostvault.com/PushPostVault-logo.png",
+		AppURL:  "https://pushpostvault.com",
 	})
 	if err != nil {
 		return "", err
@@ -55,18 +59,38 @@ type BrevoClient struct {
 	apiKey      string
 	senderName  string
 	senderEmail string
+	appURL      string
 	httpClient  *http.Client
 }
 
 func NewBrevoClient(cfg config.BrevoConfig) *BrevoClient {
+	senderName := cfg.SenderName
+	if senderName == "" || senderName == "ByteVault" || senderName == "PushPort" || senderName == "PushPortVault" {
+		senderName = "PushPostVault"
+	}
 	return &BrevoClient{
 		apiKey:      cfg.APIKey,
-		senderName:  cfg.SenderName,
+		senderName:  senderName,
 		senderEmail: cfg.SenderEmail,
+		appURL:      "https://pushpostvault.com",
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+func (b *BrevoClient) SetAppURL(url string) {
+	if url != "" {
+		b.appURL = url
+	}
+}
+
+func (b *BrevoClient) getLogoURL() string {
+	base := b.appURL
+	if base == "" {
+		base = "https://pushpostvault.com"
+	}
+	return fmt.Sprintf("%s/PushPostVault-logo.png", base)
 }
 
 // brevoRequest is the JSON body for Brevo's POST /v3/smtp/email endpoint.
@@ -91,6 +115,8 @@ func (b *BrevoClient) SendOTP(ctx context.Context, toEmail, toName, otp string) 
 		OTP:      otp,
 		OTPColor: "#a78bfa",
 		Footer:   "This code expires in 10 minutes. If you didn't request this, ignore this email.",
+		LogoURL:  b.getLogoURL(),
+		AppURL:   b.appURL,
 	})
 	return b.send(ctx, toEmail, toName, "PushPostVault — Verify your email", buf.String())
 }
@@ -104,6 +130,8 @@ func (b *BrevoClient) SendPasswordReset(ctx context.Context, toEmail, toName, ot
 		OTP:      otp,
 		OTPColor: "#fbbf24",
 		Footer:   "This code expires in 10 minutes. If you didn't request this, ignore this email.",
+		LogoURL:  b.getLogoURL(),
+		AppURL:   b.appURL,
 	})
 	return b.send(ctx, toEmail, toName, "PushPostVault — Reset your password", buf.String())
 }
