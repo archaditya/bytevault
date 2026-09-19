@@ -47,7 +47,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Wrap storage provider with the environment name prefix to isolate local and prod files
- 	store = storage.NewPrefixedStorageProvider(s.config.App.Env, store)
+	store = storage.NewPrefixedStorageProvider(s.config.App.Env, store)
 
 	// 2. Initialize Redis Queue (must happen before services that depend on it)
 	redisQueue, err := queue.NewRedisQueue(s.config.Redis)
@@ -101,10 +101,11 @@ func (s *Server) registerRoutes() {
 	// Subscription Services
 	pkgService := service.NewPackageService(pkgRepo, razorpayClient)
 	txnService := service.NewTransactionService(txnRepo, subRepo, pkgRepo, emailClient)
-	appURL := "https://pushport.archadi.dev"
+	appURL := "https://pushpostvault.com"
 	if s.config.App.Env == "development" {
 		appURL = "http://localhost:3000"
 	}
+	emailClient.SetAppURL(appURL)
 	txnService.SetAppURL(appURL)
 	subService := service.NewSubscriptionService(subRepo, pkgRepo, userRepo, subAuditRepo, razorpayClient, auditLogger, notifService)
 	fileService.SetSubscriptionRepo(subRepo)
@@ -140,11 +141,11 @@ func (s *Server) registerRoutes() {
 
 	// Public routes
 	s.registerHealthRoutes(v1)
-	
+
 	// Protected routes (JWT required)
 	authMiddleware := appMiddleware.Auth(authService)
 	protected := v1.Group("", authMiddleware)
-	
+
 	// Auth routes (needs both v1 for public + protected for MFA)
 	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo)
 

@@ -231,8 +231,8 @@ Configured Cloudflare DNS.
 
 Created subdomains:
 
-- PushPort.archadi.dev
-- api-PushPort.archadi.dev
+- pushpostvault.com
+- api-pushpostvault.com
 
 Learned about:
 
@@ -272,7 +272,7 @@ Frontend now communicates securely with:
 
 ```
 
-https://api.PushPort.archadi.dev
+https://api.pushpostvault.com
 
 ```
 

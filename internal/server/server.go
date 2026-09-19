@@ -78,7 +78,7 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://localhost:8080",
-		"https://pushport.archadi.dev",
+		"https://pushpostvault.com",
 	}
 	if cfg.Server.AllowedOrigins != "" {
 		for _, o := range strings.Split(cfg.Server.AllowedOrigins, ",") {
