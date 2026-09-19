@@ -121,9 +121,9 @@ func formatBytes(b int64) string {
 // GenerateReceiptEmailHTML renders template.html for a payment receipt notification.
 func GenerateReceiptEmailHTML(userName, invoiceNum, packageName, amountStr, invoiceURL string) string {
 	heading := "Payment Receipt"
-	message := fmt.Sprintf("Hi %s, thank you for subscribing to PushPortVault %s. Your payment was successful.", userName, packageName)
+	message := fmt.Sprintf("Hi %s, thank you for subscribing to PushPostVault %s. Your payment was successful.", userName, packageName)
 	body := fmt.Sprintf(`<div style="background:#181b22;border:1px solid #2a2d35;border-radius:10px;padding:20px;margin-bottom:20px;"><p style="margin:0 0 8px;font-size:14px;color:#8b8f96;">Invoice Number: <strong style="color:#f0f1f3;">%s</strong></p><p style="margin:0;font-size:18px;font-weight:700;color:#f0f1f3;">Total Paid: ₹%s</p></div><p style="margin:0;"><a href="%s" style="display:inline-block;background:#6c5ce7;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">View & Download Invoice</a></p>`, invoiceNum, amountStr, invoiceURL)
-	footer := "Per PushPortVault terms, subscriptions renew automatically unless cancelled. Manage anytime in Settings."
+	footer := "Per PushPostVault terms, subscriptions renew automatically unless cancelled. Manage anytime in Settings."
 	html, err := RenderNotification(heading, message, body, footer)
 	if err != nil {
 		return message
