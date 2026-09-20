@@ -18,6 +18,12 @@ type LogArchiver interface {
 	PurgeExpiredLogs(ctx context.Context) error
 }
 
+type UploadInviteProcessor interface {
+	ExpireStaleInvites(ctx context.Context) (int64, error)
+	FlushPendingNotifications(ctx context.Context) error
+	CleanupAbandonedUploads(ctx context.Context) error
+}
+
 type Scheduler struct {
 	verifyRepo       *repository.EmailVerificationRepository
 	notifRepo        *repository.NotificationRepository
@@ -27,7 +33,9 @@ type Scheduler struct {
 	subProcessor     SubscriptionProcessor
 	logArchiver      LogArchiver
 	webhookEventRepo *repository.WebhookEventRepository
+	inviteProcessor  UploadInviteProcessor
 	ticker           *time.Ticker
+	inviteTicker     *time.Ticker
 	ctx              context.Context
 	cancel           context.CancelFunc
 }
@@ -76,6 +84,9 @@ func (s *Scheduler) Start() {
 func (s *Scheduler) Stop() {
 	if s.ticker != nil {
 		s.ticker.Stop()
+	}
+	if s.inviteTicker != nil {
+		s.inviteTicker.Stop()
 	}
 	s.cancel()
 }
@@ -222,6 +233,20 @@ func (s *Scheduler) cleanupOrphans(ctx context.Context) {
 			logger.Log.Info().Int64("deleted", deletedEvents).Msg("Cleaned old webhook idempotency events")
 		}
 	}
+
+	// 6. Expire stale upload invites and cleanup abandoned guest uploads
+	if s.inviteProcessor != nil {
+		expired, err := s.inviteProcessor.ExpireStaleInvites(ctx)
+		if err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to expire stale upload invites")
+		} else if expired > 0 {
+			logger.Log.Info().Int64("expired", expired).Msg("Expired stale upload invites")
+		}
+
+		if err := s.inviteProcessor.CleanupAbandonedUploads(ctx); err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to cleanup abandoned invite uploads")
+		}
+	}
 }
 
 func (s *Scheduler) SetSubscriptionProcessor(p SubscriptionProcessor) {
@@ -234,4 +259,27 @@ func (s *Scheduler) SetLogArchiver(a LogArchiver) {
 
 func (s *Scheduler) SetWebhookEventRepo(r *repository.WebhookEventRepository) {
 	s.webhookEventRepo = r
+}
+
+func (s *Scheduler) SetUploadInviteProcessor(p UploadInviteProcessor) {
+	s.inviteProcessor = p
+
+	// Start a dedicated 10-minute ticker for batched notification flushing.
+	// The hourly cleanup handles invite expiry + abandoned upload cleanup,
+	// but notifications need a tighter loop so the owner learns about uploads quickly.
+	s.inviteTicker = time.NewTicker(10 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-s.inviteTicker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := s.inviteProcessor.FlushPendingNotifications(ctx); err != nil {
+					logger.Log.Error().Err(err).Msg("Failed to flush upload invite notifications")
+				}
+				cancel()
+			}
+		}
+	}()
 }
