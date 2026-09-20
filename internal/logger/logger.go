@@ -24,8 +24,16 @@ type DailyFileWriter struct {
 }
 
 func (w *DailyFileWriter) getFile(dateStr string) (*os.File, error) {
+	filePath := filepath.Join(w.baseDir, fmt.Sprintf("%s.app.log", dateStr))
+
 	if w.currentFile != nil && w.currentDate == dateStr {
-		return w.currentFile, nil
+		// Verify the file was not deleted or unlinked on disk
+		if _, err := os.Stat(filePath); err == nil {
+			return w.currentFile, nil
+		}
+		// File was deleted externally; close dangling handle and recreate
+		_ = w.currentFile.Close()
+		w.currentFile = nil
 	}
 
 	if w.currentFile != nil {
@@ -34,7 +42,7 @@ func (w *DailyFileWriter) getFile(dateStr string) (*os.File, error) {
 		w.currentFile = nil
 	}
 
-	filePath := filepath.Join(w.baseDir, fmt.Sprintf("%s.app.log", dateStr))
+	_ = os.MkdirAll(w.baseDir, 0755)
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, err

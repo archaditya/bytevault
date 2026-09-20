@@ -29,5 +29,6 @@ Thumbs.db
 coverage.html
 coverage.out
 
+/logs
 
 firebase.json
