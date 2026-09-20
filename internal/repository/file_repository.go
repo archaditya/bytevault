@@ -256,6 +256,18 @@ func (r *FileRepository) UpdateStatus(ctx context.Context, id string, status str
 	return err
 }
 
+// ClaimStaleUpload atomically marks a file as FAILED only if it's still UPLOADING.
+// Returns true if the file was claimed (exactly 1 row affected), making cleanup idempotent.
+func (r *FileRepository) ClaimStaleUpload(ctx context.Context, id string) (bool, error) {
+	query := `UPDATE files SET status = 'FAILED', updated_at = NOW() WHERE id = $1 AND status = 'UPLOADING'`
+	tag, err := r.db.Exec(ctx, query, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+
 func (r *FileRepository) MoveFile(ctx context.Context, id string, folderID *string) error {
 	query := `UPDATE files SET folder_id = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.Exec(ctx, query, folderID, id)

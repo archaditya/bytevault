@@ -216,7 +216,10 @@ func (w *MediaWorker) scanAndModerateNSFW(ctx context.Context, file *model.File)
 	}
 
 	// --- MEDIUM CONFIDENCE: Flag for admin review ---
-	if result.Score >= flagThreshold {
+	// Note: Only verified AI models (e.g. HuggingFace) can flag and hide files.
+	// The fallback heuristic (go-nude) only checks skin-color pixel thresholds and
+	// produces high false-positives on normal portraits, faces, and lighting.
+	if result.Score >= flagThreshold && result.Method != "heuristic" {
 		logger.Log.Warn().
 			Str("file_id", file.ID).
 			Str("user_id", file.UserID).

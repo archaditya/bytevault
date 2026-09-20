@@ -265,3 +265,39 @@ func (q *RedisQueue) DeleteOTP(ctx context.Context, email, purpose string) {
 	q.client.Del(ctx, key)
 }
 
+// StoreInviteSession saves a guest invite session token in Redis with a TTL.
+// Used after passcode verification to grant short-lived upload access.
+func (q *RedisQueue) StoreInviteSession(ctx context.Context, sessionToken, inviteID string, ttl time.Duration) error {
+	key := fmt.Sprintf("PushPort:invite_session:%s", sessionToken)
+	return q.client.Set(ctx, key, inviteID, ttl).Err()
+}
+
+// GetInviteSession retrieves the invite ID associated with a session token.
+// Returns empty string if the session has expired or doesn't exist.
+func (q *RedisQueue) GetInviteSession(ctx context.Context, sessionToken string) (string, error) {
+	key := fmt.Sprintf("PushPort:invite_session:%s", sessionToken)
+	val, err := q.client.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", nil
+		}
+		return "", err
+	}
+	return val, nil
+}
+
+// CheckPasscodeRateLimit increments and checks the passcode attempt counter for an IP+invite combo.
+// Returns the current attempt count. Window is 10 minutes.
+func (q *RedisQueue) CheckPasscodeRateLimit(ctx context.Context, ip, inviteToken string) (int64, error) {
+	key := fmt.Sprintf("PushPort:passcode_limit:%s:%s", ip, inviteToken)
+	count, err := q.client.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	// Set expiry only on first increment
+	if count == 1 {
+		q.client.Expire(ctx, key, 10*time.Minute)
+	}
+	return count, nil
+}
+

@@ -115,6 +115,10 @@ func (s *Server) registerRoutes() {
 	fileService.SetBandwidthRepo(bandwidthRepo)
 	ephemeralService.SetBandwidthRepo(bandwidthRepo)
 
+	// Upload Invite (Client File Portal)
+	uploadInviteRepo := repository.NewUploadInviteRepository(s.db)
+	uploadInviteService := service.NewUploadInviteService(uploadInviteRepo, folderRepo, fileService, notifService, userRepo, redisQueue)
+
 	// 5. Initialize Handlers
 	fileHandler := handler.NewFileHandler(fileService, s.config.Storage.LocalDir)
 	folderHandler := handler.NewFolderHandler(folderService)
@@ -124,6 +128,7 @@ func (s *Server) registerRoutes() {
 	ephemeralHandler := handler.NewEphemeralHandler(ephemeralService)
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 	moderationHandler := handler.NewModerationHandler(fileRepo, userRepo)
+	uploadInviteHandler := handler.NewUploadInviteHandler(uploadInviteService)
 
 	// Subscription Handlers
 	subHandler := handler.NewSubscriptionHandler(subService, txnService, s.config.Razorpay.KeyID)
@@ -160,6 +165,7 @@ func (s *Server) registerRoutes() {
 	s.registerEphemeralRoutes(v1, protected, ephemeralHandler)
 	s.registerModerationUserRoutes(protected, moderationHandler)
 	s.registerSubscriptionRoutes(v1, protected, subHandler, pkgHandler, webhookHandler)
+	s.registerUploadInviteRoutes(v1, protected, uploadInviteHandler)
 
 	// 7. Start Background Workers and Scheduler
 	if redisQueue != nil {
@@ -181,6 +187,7 @@ func (s *Server) registerRoutes() {
 	bgScheduler.SetSubscriptionProcessor(subService)
 	bgScheduler.SetLogArchiver(logArchiver)
 	bgScheduler.SetWebhookEventRepo(webhookEventRepo)
+	bgScheduler.SetUploadInviteProcessor(uploadInviteService)
 	bgScheduler.Start()
 }
 

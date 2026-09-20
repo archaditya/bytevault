@@ -202,9 +202,10 @@ func (d *NSFWDetector) detectWithHeuristic(imageBytes []byte) NSFWResult {
 	}
 
 	if isNude {
-		// Heuristic detection: Cap at 0.65 so it triggers FLAGGED_REVIEW (admin verification)
-		// and never triggers automated account bans or instant file deletion.
-		return NSFWResult{Score: 0.65, Label: "nsfw", Method: "heuristic"}
+		// Heuristic detection: Skin-tone pixel detector produces frequent false positives on
+		// portraits, faces, and photos with warm color palettes. Cap score at 0.35 so it
+		// is stored in the audit trail as an advisory indicator, but never auto-hides the file.
+		return NSFWResult{Score: 0.35, Label: "heuristic_skin_detected", Method: "heuristic"}
 	}
 	return NSFWResult{Score: 0.05, Label: "normal", Method: "heuristic"}
 }
