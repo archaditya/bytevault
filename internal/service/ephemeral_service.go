@@ -240,6 +240,12 @@ func (s *EphemeralService) GetMetadata(ctx context.Context, token string) (*mode
 	if share.Status == "BURNED" || time.Now().After(share.ExpiresAt) {
 		return nil, repository.ErrEphemeralNotFound
 	}
+	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 1*time.Hour, "", true)
+		if err == nil {
+			share.PreviewURL = &url
+		}
+	}
 	return share, nil
 }
 

@@ -19,4 +19,5 @@ type EphemeralShare struct {
 	ExpiresAt    time.Time  `json:"expires_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 	BurnedAt     *time.Time `json:"burned_at,omitempty"`
+	PreviewURL   *string    `json:"preview_url,omitempty"`
 }
