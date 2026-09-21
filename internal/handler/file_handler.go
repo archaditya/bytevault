@@ -189,12 +189,28 @@ func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
 
-	return SendSuccess(c, http.StatusOK, map[string]interface{}{
-		"filename":     fileMeta.Filename,
-		"file_size":    fileMeta.FileSize,
-		"content_type": fileMeta.ContentType,
-		"created_at":   fileMeta.CreatedAt,
-	}, nil)
+	data := map[string]interface{}{
+		"filename":      fileMeta.Filename,
+		"file_size":     fileMeta.FileSize,
+		"content_type":  fileMeta.ContentType,
+		"created_at":    fileMeta.CreatedAt,
+		"has_thumbnail": fileMeta.ThumbnailKey != nil && *fileMeta.ThumbnailKey != "",
+		"thumbnail_url": fileMeta.ThumbnailURL,
+	}
+
+	return SendSuccess(c, http.StatusOK, data, nil)
+}
+
+// GET /api/v1/files/public/:id/thumbnail
+func (h *FileHandler) GetPublicThumbnail(c echo.Context) error {
+	fileID := c.Param("id")
+
+	url, err := h.service.GetPublicThumbnailURL(c.Request().Context(), fileID)
+	if err != nil {
+		return SendError(c, http.StatusNotFound, "thumbnail not available")
+	}
+
+	return c.Redirect(http.StatusFound, url)
 }
 
 func (h *FileHandler) DownloadPublic(c echo.Context) error {

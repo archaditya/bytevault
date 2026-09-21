@@ -531,7 +531,7 @@ func (s *FileService) ListUserFiles(ctx context.Context, params repository.ListF
 	// Enrich files with direct presigned thumbnail URLs in the JSON response
 	for _, f := range files {
 		if f.ThumbnailKey != nil && *f.ThumbnailKey != "" {
-			url, err := s.storage.GeneratePresignedDownloadURL(ctx, *f.ThumbnailKey, 30*time.Minute, f.Filename, true)
+			url, err := s.storage.GeneratePresignedDownloadURL(ctx, *f.ThumbnailKey, 30*time.Minute, "", true)
 			if err == nil {
 				f.ThumbnailURL = &url
 			}
@@ -642,6 +642,15 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 	if !file.IsPublic {
 		return nil, fmt.Errorf("unauthorized")
 	}
+
+	// Enrich with presigned thumbnail URL if available
+	if file.ThumbnailKey != nil && *file.ThumbnailKey != "" {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 1*time.Hour, "", true)
+		if err == nil {
+			file.ThumbnailURL = &url
+		}
+	}
+
 	return file, nil
 }
 
@@ -946,10 +955,30 @@ func (s *FileService) GetThumbnail(ctx context.Context, fileID, userID string) (
 		return "", nil, fmt.Errorf("thumbnail not available")
 	}
 
-	url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 5*time.Minute, file.Filename, true)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 30*time.Minute, "", true)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to generate thumbnail presigned URL: %w", err)
 	}
 
 	return url, file, nil
+}
+
+func (s *FileService) GetPublicThumbnailURL(ctx context.Context, fileID string) (string, error) {
+	file, err := s.repo.FindByID(ctx, fileID)
+	if err != nil || file == nil {
+		return "", fmt.Errorf("file not found")
+	}
+	if !file.IsPublic {
+		return "", fmt.Errorf("unauthorized")
+	}
+	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
+		return "", fmt.Errorf("thumbnail not available")
+	}
+
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 1*time.Hour, "", true)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate thumbnail URL: %w", err)
+	}
+
+	return url, nil
 }
