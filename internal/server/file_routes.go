@@ -1,10 +1,10 @@
 package server
 
 import (
-	"github.com/labstack/echo/v4"
 	"github.com/archaditya/bytevault/internal/handler"
 	appMiddleware "github.com/archaditya/bytevault/internal/middleware"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/labstack/echo/v4"
 )
 
 // registerFileRoutes configures endpoints related to file management.
@@ -13,7 +13,8 @@ func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, auth
 	g.GET("/files/public/:id", fh.DownloadPublic)
 	g.HEAD("/files/public/:id", fh.DownloadPublic)
 	g.GET("/files/public/:id/metadata", fh.GetPublicMetadata)
-	
+	g.GET("/files/public/:id/thumbnail", fh.GetPublicThumbnail)
+
 	// Local storage direct uploads dev endpoints
 	g.PUT("/files/upload/direct", fh.UploadLocalDirect)
 	g.GET("/files/download/direct", fh.DownloadLocalDirect)

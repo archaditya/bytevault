@@ -101,16 +101,19 @@ func (r *R2Storage) GeneratePresignedUploadURL(ctx context.Context, storageKey s
 }
 
 func (r *R2Storage) GeneratePresignedDownloadURL(ctx context.Context, storageKey string, expiry time.Duration, filename string, inline bool) (string, error) {
-	disposition := "attachment; filename=\"" + filename + "\""
-	if inline {
-		disposition = "inline; filename=\"" + filename + "\""
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(r.bucket),
+		Key:    aws.String(storageKey),
+	}
+	if filename != "" {
+		disposition := "attachment; filename=\"" + filename + "\""
+		if inline {
+			disposition = "inline; filename=\"" + filename + "\""
+		}
+		input.ResponseContentDisposition = aws.String(disposition)
 	}
 
-	req, err := r.presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket:                     aws.String(r.bucket),
-		Key:                        aws.String(storageKey),
-		ResponseContentDisposition: aws.String(disposition),
-	}, s3.WithPresignExpires(expiry))
+	req, err := r.presignClient.PresignGetObject(ctx, input, s3.WithPresignExpires(expiry))
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned download URL: %w", err)
 	}
