@@ -54,6 +54,7 @@ services:
 
     volumes:
       - ./firebase.json:/firebase.json:ro
+      - ./logs:/app/logs
 
     depends_on:
       - postgres

@@ -25,7 +25,7 @@ func (r *EphemeralSettingRepository) GetSettings(ctx context.Context) (*Ephemera
 	var s EphemeralSettings
 	err := r.db.QueryRow(ctx, query).Scan(&s.MaxFileSizeGb, &s.MaxDownloads, &s.RateLimit24h, &s.ExpiryMinutes)
 	if err != nil {
-		return &EphemeralSettings{MaxFileSizeGb: 2, MaxDownloads: 1, RateLimit24h: 2, ExpiryMinutes: 60}, nil
+		return &EphemeralSettings{MaxFileSizeGb: 2, MaxDownloads: 1, RateLimit24h: 50, ExpiryMinutes: 60}, nil
 	}
 	return &s, nil
 }
