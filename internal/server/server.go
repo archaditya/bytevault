@@ -74,11 +74,11 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 
 	e.Use(middleware.Recover()) // Catches panics and return 500 error instead of crashing the server
 
-	// Hardened CORS: only allow known origins
 	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://localhost:8080",
 		"https://pushpostvault.com",
+		"https://www.pushpostvault.com",
 	}
 	if cfg.Server.AllowedOrigins != "" {
 		for _, o := range strings.Split(cfg.Server.AllowedOrigins, ",") {
@@ -88,7 +88,17 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 		}
 	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     allowedOrigins,
+		AllowOriginFunc: func(origin string) (bool, error) {
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					return true, nil
+				}
+			}
+			if strings.HasSuffix(origin, ".pushpostvault.com") || origin == "https://pushpostvault.com" {
+				return true, nil
+			}
+			return false, nil
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
 		AllowCredentials: true,

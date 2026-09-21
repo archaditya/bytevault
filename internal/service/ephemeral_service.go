@@ -45,7 +45,7 @@ func (s *EphemeralService) CreateUploadSession(ctx context.Context, filename str
 	// Read current system governance settings from DB
 	settings, err := s.settingRepo.GetSettings(ctx)
 	if err != nil || settings == nil {
-		settings = &repository.EphemeralSettings{MaxFileSizeGb: 2, MaxDownloads: 1, RateLimit24h: 2, ExpiryMinutes: 60}
+		settings = &repository.EphemeralSettings{MaxFileSizeGb: 2, MaxDownloads: 1, RateLimit24h: 50, ExpiryMinutes: 60}
 	}
 
 	maxSizeBytes := int64(settings.MaxFileSizeGb * 1024 * 1024 * 1024)
@@ -115,7 +115,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 ) (*model.EphemeralShare, string, []map[string]any, error) {
 	settings, err := s.GetSettings(ctx)
 	if err != nil {
-		settings = &repository.EphemeralSettings{MaxFileSizeGb: 2, MaxDownloads: 1, RateLimit24h: 2, ExpiryMinutes: 60}
+		settings = &repository.EphemeralSettings{MaxFileSizeGb: 2, MaxDownloads: 1, RateLimit24h: 50, ExpiryMinutes: 60}
 	}
 
 	maxBytes := int64(settings.MaxFileSizeGb) * 1024 * 1024 * 1024
