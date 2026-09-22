@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/archaditya/bytevault/internal/logger"
@@ -317,25 +318,43 @@ func (s *Scheduler) cleanupEphemeral() {
 	if s.ephemeralRepo == nil || s.store == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
 
 	for {
-		keys, err := s.ephemeralRepo.PurgeExpiredAndBurned(ctx)
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
+		// Fresh timeout context per batch to prevent long backlogs from aborting mid-loop
+		batchCtx, batchCancel := context.WithTimeout(s.ctx, 1*time.Minute)
+		keys, err := s.ephemeralRepo.PurgeExpiredAndBurned(batchCtx)
 		if err != nil {
-			logger.Log.Error().Err(err).Msg("Failed to query expired ephemeral shares from DB")
+			batchCancel()
+			if !errors.Is(err, context.Canceled) {
+				logger.Log.Error().Err(err).Msg("Failed to query expired ephemeral shares from DB")
+			}
 			return
 		}
+
 		if len(keys) == 0 {
+			batchCancel()
 			break
 		}
 
 		logger.Log.Info().Int("count", len(keys)).Msg("Purging expired ephemeral shares from R2 storage")
 		for _, key := range keys {
-			if err := s.store.Delete(ctx, key); err != nil {
-				logger.Log.Warn().Str("key", key).Err(err).Msg("Failed to delete expired ephemeral file from R2")
+			select {
+			case <-s.ctx.Done():
+				batchCancel()
+				return
+			default:
+				if err := s.store.Delete(batchCtx, key); err != nil {
+					logger.Log.Warn().Str("key", key).Err(err).Msg("Failed to delete expired ephemeral file from R2")
+				}
 			}
 		}
+		batchCancel()
 
 		// If returned batch is smaller than 100, whole backlog is drained
 		if len(keys) < 100 {
@@ -343,5 +362,6 @@ func (s *Scheduler) cleanupEphemeral() {
 		}
 	}
 }
+
 
 
