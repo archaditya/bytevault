@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
@@ -209,8 +210,58 @@ func (s *FileService) enqueueMediaProcessingJob(ctx context.Context, file *model
 }
 
 
+type FileConflictError struct {
+	Filename     string      `json:"filename"`
+	ExistingFile *model.File `json:"existing_file"`
+}
+
+func (e *FileConflictError) Error() string {
+	return fmt.Sprintf("conflict: a file named '%s' already exists in this folder", e.Filename)
+}
+
 func (s *FileService) generateStorageKey(userID, filename string) string {
-	return fmt.Sprintf("user/%s/docs/%s", userID, filepath.Base(filename))
+	return fmt.Sprintf("user/%s/docs/%s/%s", userID, uuid.New().String(), filepath.Base(filename))
+}
+
+func (s *FileService) CheckConflicts(ctx context.Context, userID string, filenames []string, folderID *string) ([]map[string]any, error) {
+	if folderID != nil && *folderID == "" {
+		folderID = nil
+	}
+	var conflicts []map[string]any
+	for _, fn := range filenames {
+		existing, err := s.repo.FindByFilenameAndFolder(ctx, userID, fn, folderID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			conflicts = append(conflicts, map[string]any{
+				"filename":      fn,
+				"existing_file": existing,
+			})
+		}
+	}
+	return conflicts, nil
+}
+
+func (s *FileService) ResolveNonConflictingFilename(ctx context.Context, userID, filename string, folderID *string) (string, error) {
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	candidate := filename
+	counter := 1
+	for {
+		existing, err := s.repo.FindByFilenameAndFolder(ctx, userID, candidate, folderID)
+		if err != nil {
+			return "", err
+		}
+		if existing == nil {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s (%d)%s", base, counter, ext)
+		counter++
+		if counter > 100 {
+			return fmt.Sprintf("%s (%s)%s", base, uuid.New().String()[:6], ext), nil
+		}
+	}
 }
 
 func (s *FileService) validateFile(ctx context.Context, userID string, size int64, contentType string) error {
@@ -266,16 +317,18 @@ func (s *FileService) validateFile(ctx context.Context, userID string, size int6
 	return nil
 }
 
-func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename string, size int64, contentType string, folderID *string, tags []string) (*model.File, string, error) {
+func (s *FileService) CreateUploadSession(
+	ctx context.Context,
+	userID, filename string,
+	size int64,
+	contentType string,
+	folderID *string,
+	tags []string,
+	conflictAction string,
+	contentHash *string,
+) (*model.File, string, error) {
 	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
 		return nil, "", err
-	}
-
-	storageKey := s.generateStorageKey(userID, filename)
-
-	uploadURL, err := s.storage.GeneratePresignedUploadURL(ctx, storageKey, contentType, 15*time.Minute)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate upload URL: %w", err)
 	}
 
 	if folderID != nil && *folderID == "" {
@@ -291,6 +344,64 @@ func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename 
 		}
 	}
 
+	// 1. Tier 1: Check for filename conflict in target folder
+	existing, err := s.repo.FindByFilenameAndFolder(ctx, userID, filename, folderID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to check filename conflict: %w", err)
+	}
+
+	if existing != nil {
+		switch strings.ToLower(conflictAction) {
+		case "replace":
+			// Replace existing file
+			storageKey := s.generateStorageKey(userID, filename)
+			uploadURL, err := s.storage.GeneratePresignedUploadURL(ctx, storageKey, contentType, 15*time.Minute)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to generate upload URL: %w", err)
+			}
+
+			if err := s.repo.UpdateFileForReplacement(ctx, existing.ID, size, contentType, storageKey, cleanTags, contentHash); err != nil {
+				return nil, "", fmt.Errorf("failed to prepare file replacement: %w", err)
+			}
+
+			existing.FileSize = size
+			existing.ContentType = contentType
+			existing.StorageKey = storageKey
+			existing.Status = "UPLOADING"
+			existing.Tags = cleanTags
+			existing.ContentHash = contentHash
+
+			s.logActivity(ctx, userID, "file.upload_session_replace", "file", existing.ID, map[string]any{
+				"filename":  filename,
+				"file_size": size,
+			})
+
+			return existing, uploadURL, nil
+
+		case "keep_both":
+			// Auto-resolve non-conflicting filename
+			resolvedName, err := s.ResolveNonConflictingFilename(ctx, userID, filename, folderID)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to resolve non-conflicting filename: %w", err)
+			}
+			filename = resolvedName
+
+		default:
+			return nil, "", &FileConflictError{
+				Filename:     filename,
+				ExistingFile: existing,
+			}
+		}
+	}
+
+	// 2. Fresh file upload session
+	storageKey := s.generateStorageKey(userID, filename)
+
+	uploadURL, err := s.storage.GeneratePresignedUploadURL(ctx, storageKey, contentType, 15*time.Minute)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate upload URL: %w", err)
+	}
+
 	fileMeta := &model.File{
 		UserID:          userID,
 		Filename:        filename,
@@ -303,6 +414,7 @@ func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename 
 		Status:          "UPLOADING",
 		FolderID:        folderID,
 		Tags:            cleanTags,
+		ContentHash:     contentHash,
 	}
 
 	if err := s.repo.Create(ctx, fileMeta); err != nil {
@@ -317,7 +429,7 @@ func (s *FileService) CreateUploadSession(ctx context.Context, userID, filename 
 	return fileMeta, uploadURL, nil
 }
 
-func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string) error {
+func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string, contentHash *string) error {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
 		return err
@@ -360,6 +472,11 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string)
 		_ = s.storage.Delete(ctx, file.StorageKey)
 		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
 		return fmt.Errorf("upload rejected: %w", err)
+	}
+
+	// Save content hash if supplied
+	if contentHash != nil && *contentHash != "" {
+		_ = s.repo.UpdateContentHash(ctx, fileID, *contentHash)
 	}
 
 	// Set status to PENDING_SCAN and enqueue background worker for malware scan + thumbnailing
@@ -656,9 +773,78 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 
 // --- Multipart Upload Methods ---
 
-func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, filename string, size int64, contentType string, folderID *string, partCount int) (*model.File, string, []map[string]interface{}, error) {
+func (s *FileService) CreateMultipartUploadSession(
+	ctx context.Context,
+	userID, filename string,
+	size int64,
+	contentType string,
+	folderID *string,
+	partCount int,
+	conflictAction string,
+	contentHash *string,
+) (*model.File, string, []map[string]interface{}, error) {
 	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
 		return nil, "", nil, err
+	}
+
+	if folderID != nil && *folderID == "" {
+		folderID = nil
+	}
+
+	// 1. Tier 1: Check for filename conflict in target folder
+	existing, err := s.repo.FindByFilenameAndFolder(ctx, userID, filename, folderID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("failed to check filename conflict: %w", err)
+	}
+
+	if existing != nil {
+		switch strings.ToLower(conflictAction) {
+		case "replace":
+			storageKey := s.generateStorageKey(userID, filename)
+			uploadID, err := s.storage.InitiateMultipartUpload(ctx, storageKey, contentType)
+			if err != nil {
+				return nil, "", nil, err
+			}
+
+			var partsURLs []map[string]interface{}
+			for i := 1; i <= partCount; i++ {
+				url, err := s.storage.GeneratePresignedUploadPartURL(ctx, storageKey, uploadID, int32(i), 30*time.Minute)
+				if err != nil {
+					_ = s.storage.AbortMultipartUpload(ctx, storageKey, uploadID)
+					return nil, "", nil, fmt.Errorf("failed to generate presigned URL for part %d: %w", i, err)
+				}
+				partsURLs = append(partsURLs, map[string]interface{}{
+					"part_number": i,
+					"url":         url,
+				})
+			}
+
+			if err := s.repo.UpdateFileForReplacement(ctx, existing.ID, size, contentType, storageKey, nil, contentHash); err != nil {
+				_ = s.storage.AbortMultipartUpload(ctx, storageKey, uploadID)
+				return nil, "", nil, fmt.Errorf("failed to prepare file replacement: %w", err)
+			}
+
+			existing.FileSize = size
+			existing.ContentType = contentType
+			existing.StorageKey = storageKey
+			existing.Status = "UPLOADING"
+			existing.ContentHash = contentHash
+
+			return existing, uploadID, partsURLs, nil
+
+		case "keep_both":
+			resolvedName, err := s.ResolveNonConflictingFilename(ctx, userID, filename, folderID)
+			if err != nil {
+				return nil, "", nil, fmt.Errorf("failed to resolve non-conflicting filename: %w", err)
+			}
+			filename = resolvedName
+
+		default:
+			return nil, "", nil, &FileConflictError{
+				Filename:     filename,
+				ExistingFile: existing,
+			}
+		}
 	}
 
 	storageKey := s.generateStorageKey(userID, filename)
@@ -674,7 +860,6 @@ func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, 
 	for i := 1; i <= partCount; i++ {
 		url, err := s.storage.GeneratePresignedUploadPartURL(ctx, storageKey, uploadID, int32(i), 30*time.Minute)
 		if err != nil {
-			//Abort session 
 			_ = s.storage.AbortMultipartUpload(ctx, storageKey, uploadID)
 			return nil, "", nil, fmt.Errorf("failed to generate presigned URL for part %d: %w", i, err)
 		}
@@ -682,10 +867,6 @@ func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, 
 			"part_number": i,
 			"url":         url,
 		})
-	}
-
-	if folderID != nil && *folderID == "" {
-		folderID = nil
 	}
 
 	fileMeta := &model.File{
@@ -699,6 +880,7 @@ func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, 
 		IsPublic:        false,
 		Status:          "UPLOADING",
 		FolderID:        folderID,
+		ContentHash:     contentHash,
 	}
 
 	// create file record in db
@@ -715,7 +897,7 @@ func (s *FileService) CreateMultipartUploadSession(ctx context.Context, userID, 
 	return fileMeta, uploadID, partsURLs, nil
 }
 
-func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userID string, uploadID string, parts []model.UploadPart) error {
+func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userID string, uploadID string, parts []model.UploadPart, contentHash *string) error {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
 		return err
@@ -763,6 +945,10 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 		_ = s.storage.Delete(ctx, file.StorageKey)
 		_ = s.repo.UpdateStatus(ctx, fileID, "FAILED")
 		return fmt.Errorf("upload rejected: %w", err)
+	}
+
+	if contentHash != nil && *contentHash != "" {
+		_ = s.repo.UpdateContentHash(ctx, fileID, *contentHash)
 	}
 
 	if err := s.repo.UpdateStatus(ctx, fileID, "PENDING_SCAN"); err != nil {

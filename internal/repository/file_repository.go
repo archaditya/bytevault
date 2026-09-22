@@ -55,8 +55,8 @@ func buildPrefixTsQuery(search string) string {
 
 func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 	query := `
-		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, tags, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, tags, content_hash, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
 		RETURNING id, created_at, updated_at
 	`
 	err := r.db.QueryRow(ctx, query,
@@ -71,6 +71,7 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 		file.Status,
 		file.FolderID,
 		file.Tags,
+		file.ContentHash,
 	).Scan(&file.ID, &file.CreatedAt, &file.UpdatedAt)
 
 	if err != nil {
@@ -730,4 +731,83 @@ func (r *FileRepository) GetModerationStats(ctx context.Context) (totalBlocked i
 	`
 	err = r.db.QueryRow(ctx, query).Scan(&totalBlocked, &totalFlagged)
 	return
+}
+
+// FindByFilenameAndFolder finds an active (non-deleted) file by name in the specified folder (or root if folderID is nil).
+func (r *FileRepository) FindByFilenameAndFolder(ctx context.Context, userID, filename string, folderID *string) (*model.File, error) {
+	var query string
+	var row pgx.Row
+	if folderID == nil || *folderID == "" {
+		query = `
+			SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0), content_hash
+			FROM files
+			WHERE user_id = $1 AND filename = $2 AND folder_id IS NULL AND deleted_at IS NULL
+			ORDER BY created_at DESC LIMIT 1
+		`
+		row = r.db.QueryRow(ctx, query, userID, filename)
+	} else {
+		query = `
+			SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0), content_hash
+			FROM files
+			WHERE user_id = $1 AND filename = $2 AND folder_id = $3 AND deleted_at IS NULL
+			ORDER BY created_at DESC LIMIT 1
+		`
+		row = r.db.QueryRow(ctx, query, userID, filename, *folderID)
+	}
+
+	var f model.File
+	if err := row.Scan(
+		&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey,
+		&f.ThumbnailKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status,
+		&f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags,
+		&f.NSFWScore, &f.ContentHash,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to check filename conflict: %w", err)
+	}
+	return &f, nil
+}
+
+// FindByContentHash finds an active file with matching content hash for the user (Tier 2 deduplication).
+func (r *FileRepository) FindByContentHash(ctx context.Context, userID, contentHash string) (*model.File, error) {
+	query := `
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0), content_hash
+		FROM files
+		WHERE user_id = $1 AND content_hash = $2 AND status = 'READY' AND deleted_at IS NULL
+		ORDER BY created_at DESC LIMIT 1
+	`
+	var f model.File
+	err := r.db.QueryRow(ctx, query, userID, contentHash).Scan(
+		&f.ID, &f.UserID, &f.Filename, &f.StorageProvider, &f.Bucket, &f.StorageKey,
+		&f.ThumbnailKey, &f.FileSize, &f.ContentType, &f.IsPublic, &f.Status,
+		&f.FolderID, &f.CreatedAt, &f.UpdatedAt, &f.Downloads, &f.Tags,
+		&f.NSFWScore, &f.ContentHash,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to check content hash: %w", err)
+	}
+	return &f, nil
+}
+
+// UpdateFileForReplacement updates an existing file record with new upload metadata when user chooses 'replace'.
+func (r *FileRepository) UpdateFileForReplacement(ctx context.Context, fileID string, size int64, contentType, storageKey string, tags []string, contentHash *string) error {
+	query := `
+		UPDATE files
+		SET file_size = $1, content_type = $2, storage_key = $3, tags = $4, content_hash = $5, status = 'UPLOADING', updated_at = NOW()
+		WHERE id = $6
+	`
+	_, err := r.db.Exec(ctx, query, size, contentType, storageKey, tags, contentHash, fileID)
+	return err
+}
+
+// UpdateContentHash updates the SHA-256 hash of a file once completed.
+func (r *FileRepository) UpdateContentHash(ctx context.Context, fileID string, hash string) error {
+	query := `UPDATE files SET content_hash = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, hash, fileID)
+	return err
 }

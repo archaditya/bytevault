@@ -439,7 +439,7 @@ func (s *UploadInviteService) GuestCreateUploadSession(
 
 	// 7. Create upload session under the owner's identity and quota
 	file, uploadURL, err := s.fileService.CreateUploadSession(
-		ctx, invite.OwnerID, filename, size, contentType, invite.TargetFolderID, nil,
+		ctx, invite.OwnerID, filename, size, contentType, invite.TargetFolderID, nil, "keep_both", nil,
 	)
 	if err != nil {
 		// Release the reserved capacity on failure
@@ -500,7 +500,7 @@ func (s *UploadInviteService) GuestCompleteUpload(ctx context.Context, token, fi
 	}
 
 	// 5. Delegate to FileService.CompleteUpload (magic byte validation, malware scan queue)
-	if err := s.fileService.CompleteUpload(ctx, fileID, invite.OwnerID); err != nil {
+	if err := s.fileService.CompleteUpload(ctx, fileID, invite.OwnerID, nil); err != nil {
 		// Release capacity on failed validation
 		_ = s.inviteRepo.ReleaseUsage(ctx, invite.ID, file.FileSize)
 		return err

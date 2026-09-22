@@ -30,6 +30,7 @@ func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, auth
 
 		// Write routes (blocked for restricted users via RestrictionCheck middleware)
 		restrictCheck := appMiddleware.RestrictionCheck(userRepo)
+		filesGroup.POST("/check-conflicts", fh.CheckConflicts)
 		filesGroup.POST("/upload-session", fh.CreateUploadSession, restrictCheck)
 		filesGroup.POST("/:id/complete", fh.CompleteUpload, restrictCheck)
 		filesGroup.POST("/multipart-session", fh.CreateMultipartSession, restrictCheck)
