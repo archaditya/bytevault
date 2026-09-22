@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -32,25 +33,68 @@ func (h *FileHandler) CreateUploadSession(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	var req struct {
-		Filename    string   `json:"filename"`
-		FileSize    int64    `json:"file_size"`
-		ContentType string   `json:"content_type"`
-		FolderID    *string  `json:"folder_id,omitempty"`
-		Tags        []string `json:"tags,omitempty"`
+		Filename       string   `json:"filename"`
+		FileSize       int64    `json:"file_size"`
+		ContentType    string   `json:"content_type"`
+		FolderID       *string  `json:"folder_id,omitempty"`
+		Tags           []string `json:"tags,omitempty"`
+		ConflictAction string   `json:"conflict_action,omitempty"` // "replace" | "keep_both"
+		ContentHash    *string  `json:"content_hash,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" {
 		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
 	}
 
-	fileMeta, uploadURL, err := h.service.CreateUploadSession(c.Request().Context(), userID, req.Filename, req.FileSize, req.ContentType, req.FolderID, req.Tags)
+	fileMeta, uploadURL, err := h.service.CreateUploadSession(
+		c.Request().Context(),
+		userID,
+		req.Filename,
+		req.FileSize,
+		req.ContentType,
+		req.FolderID,
+		req.Tags,
+		req.ConflictAction,
+		req.ContentHash,
+	)
 	if err != nil {
+		var conflictErr *service.FileConflictError
+		if errors.As(err, &conflictErr) {
+			return SendConflict(c, conflictErr.Error(), map[string]interface{}{
+				"filename":      conflictErr.Filename,
+				"existing_file": conflictErr.ExistingFile,
+			})
+		}
 		return SendError(c, http.StatusBadRequest, err.Error())
 	}
 
 	return SendSuccess(c, http.StatusOK, map[string]interface{}{
 		"file_id":    fileMeta.ID,
+		"filename":   fileMeta.Filename,
 		"upload_url": uploadURL,
+	}, nil)
+}
+
+// POST /api/v1/files/check-conflicts
+func (h *FileHandler) CheckConflicts(c echo.Context) error {
+	userID := c.Get("user_id").(string)
+
+	var req struct {
+		FolderID  *string  `json:"folder_id,omitempty"`
+		Filenames []string `json:"filenames"`
+	}
+
+	if err := c.Bind(&req); err != nil || len(req.Filenames) == 0 {
+		return SendError(c, http.StatusBadRequest, "filenames array is required")
+	}
+
+	conflicts, err := h.service.CheckConflicts(c.Request().Context(), userID, req.Filenames, req.FolderID)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"conflicts": conflicts,
 	}, nil)
 }
 
@@ -59,7 +103,12 @@ func (h *FileHandler) CompleteUpload(c echo.Context) error {
 	fileID := c.Param("id")
 	userID := c.Get("user_id").(string)
 
-	err := h.service.CompleteUpload(c.Request().Context(), fileID, userID)
+	var req struct {
+		ContentHash *string `json:"content_hash,omitempty"`
+	}
+	_ = c.Bind(&req)
+
+	err := h.service.CompleteUpload(c.Request().Context(), fileID, userID, req.ContentHash)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, err.Error())
 	}
@@ -380,11 +429,13 @@ func (h *FileHandler) CreateMultipartSession(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	var req struct {
-		Filename    string  `json:"filename"`
-		FileSize    int64   `json:"file_size"`
-		ContentType string  `json:"content_type"`
-		FolderID    *string `json:"folder_id,omitempty"`
-		PartCount   int     `json:"part_count"`
+		Filename       string  `json:"filename"`
+		FileSize       int64   `json:"file_size"`
+		ContentType    string  `json:"content_type"`
+		FolderID       *string `json:"folder_id,omitempty"`
+		PartCount      int     `json:"part_count"`
+		ConflictAction string  `json:"conflict_action,omitempty"`
+		ContentHash    *string `json:"content_hash,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" || req.PartCount <= 0 {
@@ -392,14 +443,30 @@ func (h *FileHandler) CreateMultipartSession(c echo.Context) error {
 	}
 
 	fileMeta, uploadID, partURLs, err := h.service.CreateMultipartUploadSession(
-		c.Request().Context(), userID, req.Filename, req.FileSize, req.ContentType, req.FolderID, req.PartCount,
+		c.Request().Context(),
+		userID,
+		req.Filename,
+		req.FileSize,
+		req.ContentType,
+		req.FolderID,
+		req.PartCount,
+		req.ConflictAction,
+		req.ContentHash,
 	)
 	if err != nil {
+		var conflictErr *service.FileConflictError
+		if errors.As(err, &conflictErr) {
+			return SendConflict(c, conflictErr.Error(), map[string]interface{}{
+				"filename":      conflictErr.Filename,
+				"existing_file": conflictErr.ExistingFile,
+			})
+		}
 		return SendError(c, http.StatusBadRequest, err.Error())
 	}
 
 	return SendSuccess(c, http.StatusOK, map[string]interface{}{
 		"file_id":   fileMeta.ID,
+		"filename":  fileMeta.Filename,
 		"upload_id": uploadID,
 		"part_urls": partURLs,
 	}, nil)
@@ -411,15 +478,16 @@ func (h *FileHandler) CompleteMultipartSession(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	var req struct {
-		UploadID string             `json:"upload_id"`
-		Parts    []model.UploadPart `json:"parts"`
+		UploadID    string             `json:"upload_id"`
+		Parts       []model.UploadPart `json:"parts"`
+		ContentHash *string            `json:"content_hash,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.Parts) == 0 {
 		return SendError(c, http.StatusBadRequest, "Invalid completion parameters")
 	}
 
-	err := h.service.CompleteMultipartUpload(c.Request().Context(), fileID, userID, req.UploadID, req.Parts)
+	err := h.service.CompleteMultipartUpload(c.Request().Context(), fileID, userID, req.UploadID, req.Parts, req.ContentHash)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, err.Error())
 	}

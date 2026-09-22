@@ -32,6 +32,9 @@ type File struct {
 	// NSFW content moderation score (0.0 = safe, 1.0 = explicit)
 	NSFWScore       float64    `json:"nsfw_score,omitempty"`
 
+	// SHA-256 content hash for deduplication and integrity check
+	ContentHash     *string    `json:"content_hash,omitempty"`
+
 	// Enriched fields for user/admin views
 	OwnerName       string     `json:"owner_name,omitempty"`
 	OwnerEmail      string     `json:"owner_email,omitempty"`

@@ -36,3 +36,12 @@ func SendError(c echo.Context, statusCode int, errorMessage string) error {
 		Detail: errorMessage,
 	})
 }
+
+// SendConflict sends a standardized 409 Conflict JSON response with conflict payload.
+func SendConflict(c echo.Context, errorMessage string, data any) error {
+	return c.JSON(409, APIResponse{
+		Status: "conflict",
+		Detail: errorMessage,
+		Data:   data,
+	})
+}

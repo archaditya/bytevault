@@ -82,7 +82,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 		return nil, nil, fmt.Errorf("failed to check email: %w", err)
 	}
 
-	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -178,14 +178,28 @@ func (s *AuthService) Login(ctx context.Context, email, password string, userAge
 		}, ErrMFARequired
 	}
 
-	// Log activity
-	s.activityRepo.Log(ctx, &model.ActivityLog{
-		UserID:       &user.ID,
-		Action:       "user.login",
-		ResourceType: strPtr("session"),
-		IPAddress:    ip,
-		UserAgent:    userAgent,
-	})
+	// Log activity asynchronously so it doesn't add DB latency to login response
+	go func() {
+		_ = s.activityRepo.Log(context.Background(), &model.ActivityLog{
+			UserID:       &user.ID,
+			Action:       "user.login",
+			ResourceType: strPtr("session"),
+			IPAddress:    ip,
+			UserAgent:    userAgent,
+		})
+	}()
+
+	// Auto-upgrade older high-cost (e.g. cost 14) hashes to bcrypt.DefaultCost in background
+	if user.Password != nil {
+		cost, costErr := bcrypt.Cost([]byte(*user.Password))
+		if costErr == nil && cost > bcrypt.DefaultCost {
+			go func(uid string, pw string) {
+				if upgraded, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost); err == nil {
+					_ = s.userRepo.UpdatePassword(context.Background(), uid, string(upgraded))
+				}
+			}(user.ID, password)
+		}
+	}
 
 	tokens, err := s.createSession(ctx, user.ID, user.RoleName, user.Permissions, userAgent, ip)
 	if err != nil {
@@ -369,7 +383,7 @@ func (s *AuthService) GoogleLogin(
 				return nil, nil, fmt.Errorf("failed to generate secure temp password: %w", randErr)
 			}
 			tempPassword := hex.EncodeToString(tempPass)
-			hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), 14)
+			hashedBytes, _ := bcrypt.GenerateFromPassword([]byte(tempPassword), bcrypt.DefaultCost)
 			hashedPassword := string(hashedBytes)
 
 			user = &model.User{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"html"
 	"math/big"
 	"time"
 
@@ -242,7 +243,7 @@ func (s *NotificationService) ResetPassword(ctx context.Context, email, otp, new
 	}
 
 	// Hash password
-	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(newPassword), 14)
+	hashedBytes, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -360,6 +361,16 @@ func (s *NotificationService) SendAdminNotification(
 					_ = s.queue.Enqueue(ctx, job)
 				}
 			case "email":
+				renderedBody, renderErr := email.RenderNotification(
+					title,
+					fmt.Sprintf("Hi %s,", firstName),
+					fmt.Sprintf("<div style=\"font-size: 15px; line-height: 1.6; color: #e2e4e9;\">%s</div>", html.EscapeString(body)),
+					"You received this official notification from PushPostVault Administration.",
+				)
+				if renderErr != nil {
+					renderedBody = fmt.Sprintf("<p>%s</p>", html.EscapeString(body))
+				}
+
 				job := &queue.Job{
 					ID:        jobID,
 					Type:      queue.JobTypeEmail,
@@ -370,7 +381,7 @@ func (s *NotificationService) SendAdminNotification(
 						"to_email":  u.Email,
 						"to_name":   firstName,
 						"subject":   title,
-						"html_body": fmt.Sprintf("<p>%s</p>", body),
+						"html_body": renderedBody,
 					},
 				}
 				if s.queue != nil {

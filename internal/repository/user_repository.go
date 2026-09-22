@@ -34,7 +34,7 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 	query := `
 		INSERT INTO users (email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
+		RETURNING id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at, mfa_enabled
 	`
 
 	var created model.User
@@ -52,6 +52,7 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 		&created.CreatedAt,
 		&created.UpdatedAt,
 		&created.DeletedAt,
+		&created.MfaEnabled,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create user: %w", err)
@@ -62,7 +63,7 @@ func (r *UserRepository) Create(ctx context.Context, user *model.User) (*model.U
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
 	query := `
-		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
+		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at, mfa_enabled
 		FROM users
 		WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL
 	`
@@ -82,6 +83,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 		&user.CreatedAt,
 		&user.UpdatedAt,
 		&user.DeletedAt,
+		&user.MfaEnabled,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -95,7 +97,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*model.
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*model.User, error) {
 	query := `
-		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at
+		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at, mfa_enabled
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -115,6 +117,7 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*model.User, 
 		&user.CreatedAt,
 		&user.UpdatedAt,
 		&user.DeletedAt,
+		&user.MfaEnabled,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -186,7 +189,7 @@ func (r *UserRepository) ListAll(ctx context.Context, search string, status stri
 
 	// Data query
 	query := `
-		SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.is_verified, u.status, u.storage_limit_bytes, u.max_file_size_bytes, u.created_at, u.updated_at
+		SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.avatar_url, u.is_verified, u.status, u.storage_limit_bytes, u.max_file_size_bytes, u.created_at, u.updated_at, u.mfa_enabled
 		FROM users u
 		LEFT JOIN user_roles ur ON u.id = ur.user_id
 		LEFT JOIN roles r ON ur.role_id = r.id
@@ -208,7 +211,7 @@ func (r *UserRepository) ListAll(ctx context.Context, search string, status stri
 		var u model.User
 		if err := rows.Scan(
 			&u.ID, &u.Email, &u.FirstName, &u.LastName, &u.AvatarURL,
-			&u.IsVerified, &u.Status, &u.StorageLimitBytes, &u.MaxFileSizeBytes, &u.CreatedAt, &u.UpdatedAt,
+			&u.IsVerified, &u.Status, &u.StorageLimitBytes, &u.MaxFileSizeBytes, &u.CreatedAt, &u.UpdatedAt, &u.MfaEnabled,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan user: %w", err)
 		}
