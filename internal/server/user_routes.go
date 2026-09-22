@@ -191,7 +191,7 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusUnauthorized, "Current password is incorrect")
 		}
 
-		hashedBytes, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 14)
+		hashedBytes, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 		if err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to hash new password")
 		}

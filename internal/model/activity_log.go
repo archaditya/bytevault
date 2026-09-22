@@ -12,6 +12,7 @@ import "time"
 type ActivityLog struct {
 	ID           string         `json:"id"`
 	UserID       *string        `json:"user_id"`
+	UserEmail    *string        `json:"user_email,omitempty"`
 	Action       string         `json:"action"`        // "user.register", "user.login", "admin.view_users"
 	ResourceType *string        `json:"resource_type"`  // "user", "file", "session"
 	ResourceID   *string        `json:"resource_id"`

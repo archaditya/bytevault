@@ -24,6 +24,7 @@ type AdminHandler struct {
 	bandwidthRepo *repository.BandwidthRepository
 	telemetry     *monitoring.TelemetryTracker
 	db            *pgxpool.Pool
+	settingRepo   *repository.SystemSettingRepository
 }
 
 func NewAdminHandler(
@@ -51,6 +52,10 @@ func (h *AdminHandler) SetMonitoringDependencies(telemetry *monitoring.Telemetry
 	h.telemetry = telemetry
 	h.bandwidthRepo = bandwidthRepo
 	h.db = db
+}
+
+func (h *AdminHandler) SetSettingRepository(settingRepo *repository.SystemSettingRepository) {
+	h.settingRepo = settingRepo
 }
 
 // Helper to get pointer to string
@@ -317,7 +322,24 @@ func (h *AdminHandler) ListActivity(c echo.Context) error {
 	}
 	offset := (page - 1) * limit
 
-	logs, total, err := h.activityRepo.ListAll(c.Request().Context(), limit, offset)
+	var startDate, endDate *time.Time
+	if s := c.QueryParam("start_date"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			startDate = &t
+		} else if t, err := time.Parse("2006-01-02", s); err == nil {
+			startDate = &t
+		}
+	}
+	if e := c.QueryParam("end_date"); e != "" {
+		if t, err := time.Parse(time.RFC3339, e); err == nil {
+			endDate = &t
+		} else if t, err := time.Parse("2006-01-02", e); err == nil {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+			endDate = &t
+		}
+	}
+
+	logs, total, err := h.activityRepo.ListAll(c.Request().Context(), limit, offset, startDate, endDate)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, "Failed to list activity")
 	}
@@ -328,7 +350,12 @@ func (h *AdminHandler) ListActivity(c echo.Context) error {
 		Page:  page,
 	}
 
-	return SendSuccess(c, http.StatusOK, map[string]any{"logs": logs}, pagination)
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"logs":  logs,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	}, pagination)
 }
 
 // GET /api/v1/admin/files
@@ -406,4 +433,47 @@ func (h *AdminHandler) GetBandwidth(c echo.Context) error {
 
 	return SendSuccess(c, http.StatusOK, summary, nil)
 }
+
+// GET /api/v1/admin/settings
+func (h *AdminHandler) GetSettings(c echo.Context) error {
+	if h.settingRepo == nil {
+		if h.db != nil {
+			h.settingRepo = repository.NewSystemSettingRepository(h.db)
+		} else {
+			return SendError(c, http.StatusInternalServerError, "Settings repository not initialized")
+		}
+	}
+	settings, err := h.settingRepo.GetSettings(c.Request().Context())
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to fetch system settings")
+	}
+	return SendSuccess(c, http.StatusOK, settings, nil)
+}
+
+// PUT /api/v1/admin/settings
+func (h *AdminHandler) UpdateSettings(c echo.Context) error {
+	if h.settingRepo == nil {
+		if h.db != nil {
+			h.settingRepo = repository.NewSystemSettingRepository(h.db)
+		} else {
+			return SendError(c, http.StatusInternalServerError, "Settings repository not initialized")
+		}
+	}
+	var req repository.SystemSettings
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "Invalid request body")
+	}
+	if req.MaxUploadMB <= 0 {
+		req.MaxUploadMB = 100
+	}
+	if req.RateLimitPerHour <= 0 {
+		req.RateLimitPerHour = 1000
+	}
+
+	if err := h.settingRepo.UpdateSettings(c.Request().Context(), &req); err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to update system settings")
+	}
+	return SendSuccess(c, http.StatusOK, req, nil)
+}
+
 

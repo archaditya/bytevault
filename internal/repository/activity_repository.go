@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -40,23 +42,48 @@ func (r *ActivityRepository) Log(ctx context.Context, log *model.ActivityLog) er
 	return nil
 }
 
-// ListAll returns paginated activity logs (newest first)
-// offset = skip N rows, limit = return N rows
-func (r *ActivityRepository) ListAll(ctx context.Context, limit, offset int) ([]model.ActivityLog, int, error) {
-	// Get total count for pagination
+// ListAll returns paginated activity logs (newest first) with optional date filtering
+func (r *ActivityRepository) ListAll(ctx context.Context, limit, offset int, startDate, endDate *time.Time) ([]model.ActivityLog, int, error) {
+	var whereClauses []string
+	var args []any
+	argIdx := 1
+
+	if startDate != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("al.created_at >= $%d", argIdx))
+		args = append(args, *startDate)
+		argIdx++
+	}
+	if endDate != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("al.created_at <= $%d", argIdx))
+		args = append(args, *endDate)
+		argIdx++
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Count query
+	countQuery := "SELECT COUNT(*) FROM activity_logs al " + whereSQL
 	var total int
-	err := r.db.QueryRow(ctx, "SELECT COUNT(*) FROM activity_logs").Scan(&total)
+	err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count activity logs: %w", err)
 	}
 
-	query := `
-		SELECT id, user_id, action, resource_type, resource_id, metadata, ip_address, user_agent, created_at
-		FROM activity_logs ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2
-	`
+	// Select query
+	selectQuery := fmt.Sprintf(`
+		SELECT al.id, al.user_id, al.action, al.resource_type, al.resource_id, al.metadata, al.ip_address, al.user_agent, al.created_at, u.email
+		FROM activity_logs al
+		LEFT JOIN users u ON al.user_id = u.id
+		%s
+		ORDER BY al.created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereSQL, argIdx, argIdx+1)
 
-	rows, err := r.db.Query(ctx, query, limit, offset)
+	selectArgs := append(args, limit, offset)
+	rows, err := r.db.Query(ctx, selectQuery, selectArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list activity logs: %w", err)
 	}
@@ -69,7 +96,7 @@ func (r *ActivityRepository) ListAll(ctx context.Context, limit, offset int) ([]
 
 		if err := rows.Scan(
 			&l.ID, &l.UserID, &l.Action, &l.ResourceType, &l.ResourceID,
-			&metaJSON, &l.IPAddress, &l.UserAgent, &l.CreatedAt,
+			&metaJSON, &l.IPAddress, &l.UserAgent, &l.CreatedAt, &l.UserEmail,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan activity log: %w", err)
 		}

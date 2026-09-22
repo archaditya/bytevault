@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	firebase "firebase.google.com/go/v4"
@@ -134,6 +136,19 @@ func (wp *WorkerPool) runEmailWorker(id int) {
 			} else {
 				subject, _ := job.Payload["subject"].(string)
 				htmlBody, _ := job.Payload["html_body"].(string)
+
+				// Ensure every outgoing email has the professional styled HTML template
+				if !strings.Contains(htmlBody, "<!doctype html") && !strings.Contains(htmlBody, "<html") {
+					greeting := "Hi,"
+					if toName != "" {
+						greeting = fmt.Sprintf("Hi %s,", toName)
+					}
+					rendered, renderErr := email.RenderNotification(subject, greeting, htmlBody, "You received this official notification from ByteVault.")
+					if renderErr == nil {
+						htmlBody = rendered
+					}
+				}
+
 				sendErr = wp.emailClient.SendGeneric(wp.ctx, toEmail, toName, subject, htmlBody)
 			}
 

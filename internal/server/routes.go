@@ -135,6 +135,8 @@ func (s *Server) registerRoutes() {
 	pkgHandler := handler.NewPackageHandler(pkgService, subService, txnService, subRepo, subAuditRepo)
 	pkgHandler.SetSystemLogRepo(systemLogRepo)
 	webhookHandler := handler.NewWebhookHandler(razorpayClient, subRepo, pkgRepo, userRepo, subAuditRepo, txnService, auditLogger, notifService, webhookEventRepo)
+	settingRepo := repository.NewSystemSettingRepository(s.db)
+	adminHandler.SetSettingRepository(settingRepo)
 	adminHandler.SetSubscriptionDependencies(subRepo, subService)
 	adminHandler.SetMonitoringDependencies(monitoring.GlobalTelemetry, bandwidthRepo, s.db)
 
@@ -143,6 +145,7 @@ func (s *Server) registerRoutes() {
 
 	// 6. Setup Route Groups
 	v1 := s.echo.Group("/api/v1")
+	v1.Use(appMiddleware.MaintenanceModeMiddleware(settingRepo))
 
 	// Public routes
 	s.registerHealthRoutes(v1)
