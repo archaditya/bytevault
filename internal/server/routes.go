@@ -191,6 +191,7 @@ func (s *Server) registerRoutes() {
 	bgScheduler.SetLogArchiver(logArchiver)
 	bgScheduler.SetWebhookEventRepo(webhookEventRepo)
 	bgScheduler.SetUploadInviteProcessor(uploadInviteService)
+	bgScheduler.SetEphemeralRepository(ephemeralRepo)
 	bgScheduler.Start()
 }
 

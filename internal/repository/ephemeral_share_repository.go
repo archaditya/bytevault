@@ -98,11 +98,23 @@ func (r *EphemeralShareRepository) DeleteByToken(ctx context.Context, token stri
 }
 
 func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, offset int) ([]*model.EphemeralShare, int, error) {
+	// Sync DB: Mark any past-due shares as EXPIRED
+	_, _ = r.db.Exec(ctx, `
+		UPDATE ephemeral_shares 
+		SET status = 'EXPIRED' 
+		WHERE status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()
+	`)
+
 	var total int
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ephemeral_shares`).Scan(&total)
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ephemeral_shares`).Scan(&total)
 
 	query := `
-		SELECT id, token, storage_key, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, expires_at, created_at, burned_at
+		SELECT id, token, storage_key, filename, file_size, content_type, 
+		       CASE 
+		         WHEN status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW() THEN 'EXPIRED'
+		         ELSE status
+		       END AS status,
+		       max_downloads, download_count, ip_address, user_agent, expires_at, created_at, burned_at
 		FROM ephemeral_shares
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -128,10 +140,25 @@ func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, o
 }
 
 func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([]string, error) {
+	// 1. Mark past-due shares as EXPIRED
+	_, _ = r.db.Exec(ctx, `
+		UPDATE ephemeral_shares 
+		SET status = 'EXPIRED' 
+		WHERE status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()
+	`)
+
+	// 2. Select storage keys of expired or burned shares that still have physical files in R2
 	query := `
-		DELETE FROM ephemeral_shares
-		WHERE (status = 'READY' AND expires_at < NOW()) OR status = 'BURNED'
-		RETURNING storage_key
+		SELECT id, storage_key
+		FROM ephemeral_shares
+		WHERE storage_key IS NOT NULL 
+		  AND storage_key != ''
+		  AND (
+		    status = 'EXPIRED' OR
+		    (status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()) OR
+		    (status = 'BURNED' AND (burned_at < NOW() - INTERVAL '15 minutes' OR burned_at IS NULL))
+		  )
+		LIMIT 100
 	`
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
@@ -139,12 +166,28 @@ func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([
 	}
 	defer rows.Close()
 
-	var keys []string
+	type shareTarget struct {
+		id  string
+		key string
+	}
+	var targets []shareTarget
 	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err == nil {
-			keys = append(keys, key)
+		var t shareTarget
+		if err := rows.Scan(&t.id, &t.key); err == nil && t.key != "" {
+			targets = append(targets, t)
 		}
+	}
+
+	var keys []string
+	for _, t := range targets {
+		keys = append(keys, t.key)
+		// Clear storage_key so it is never deleted twice, keeping the audit row intact
+		_, _ = r.db.Exec(ctx, `
+			UPDATE ephemeral_shares 
+			SET storage_key = '', 
+			    status = CASE WHEN status = 'BURNED' THEN 'BURNED' ELSE 'EXPIRED' END 
+			WHERE id = $1
+		`, t.id)
 	}
 	return keys, nil
 }

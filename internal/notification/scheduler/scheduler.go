@@ -34,8 +34,10 @@ type Scheduler struct {
 	logArchiver      LogArchiver
 	webhookEventRepo *repository.WebhookEventRepository
 	inviteProcessor  UploadInviteProcessor
+	ephemeralRepo    *repository.EphemeralShareRepository
 	ticker           *time.Ticker
 	inviteTicker     *time.Ticker
+	ephemeralTicker  *time.Ticker
 	ctx              context.Context
 	cancel           context.CancelFunc
 }
@@ -59,6 +61,10 @@ func NewScheduler(
 	}
 }
 
+func (s *Scheduler) SetEphemeralRepository(repo *repository.EphemeralShareRepository) {
+	s.ephemeralRepo = repo
+}
+
 func (s *Scheduler) Start() {
 	// FIX #10: Run maintenance hourly, with an initial run after 15s warmup instead of 24h delay
 	s.ticker = time.NewTicker(1 * time.Hour)
@@ -79,6 +85,26 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
+
+	// Ephemeral Share Purge Worker: Runs every 2 minutes (with 5-second initial run)
+	s.ephemeralTicker = time.NewTicker(2 * time.Minute)
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+			s.cleanupEphemeral()
+		}
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-s.ephemeralTicker.C:
+				s.cleanupEphemeral()
+			}
+		}
+	}()
 }
 
 func (s *Scheduler) Stop() {
@@ -87,6 +113,9 @@ func (s *Scheduler) Stop() {
 	}
 	if s.inviteTicker != nil {
 		s.inviteTicker.Stop()
+	}
+	if s.ephemeralTicker != nil {
+		s.ephemeralTicker.Stop()
 	}
 	s.cancel()
 }
@@ -283,3 +312,36 @@ func (s *Scheduler) SetUploadInviteProcessor(p UploadInviteProcessor) {
 		}
 	}()
 }
+
+func (s *Scheduler) cleanupEphemeral() {
+	if s.ephemeralRepo == nil || s.store == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	for {
+		keys, err := s.ephemeralRepo.PurgeExpiredAndBurned(ctx)
+		if err != nil {
+			logger.Log.Error().Err(err).Msg("Failed to query expired ephemeral shares from DB")
+			return
+		}
+		if len(keys) == 0 {
+			break
+		}
+
+		logger.Log.Info().Int("count", len(keys)).Msg("Purging expired ephemeral shares from R2 storage")
+		for _, key := range keys {
+			if err := s.store.Delete(ctx, key); err != nil {
+				logger.Log.Warn().Str("key", key).Err(err).Msg("Failed to delete expired ephemeral file from R2")
+			}
+		}
+
+		// If returned batch is smaller than 100, whole backlog is drained
+		if len(keys) < 100 {
+			break
+		}
+	}
+}
+
+
