@@ -327,10 +327,10 @@ func (s *Scheduler) cleanupEphemeral() {
 		}
 
 		// Fresh timeout context per batch to prevent long backlogs from aborting mid-loop
-		batchCtx, batchCancel := context.WithTimeout(s.ctx, 1*time.Minute)
+		batchCtx, batchCancel := context.WithTimeout(s.ctx, 30*time.Second)
 		keys, err := s.ephemeralRepo.PurgeExpiredAndBurned(batchCtx)
+		batchCancel()
 		if err != nil {
-			batchCancel()
 			if !errors.Is(err, context.Canceled) {
 				logger.Log.Error().Err(err).Msg("Failed to query expired ephemeral shares from DB")
 			}
@@ -338,7 +338,6 @@ func (s *Scheduler) cleanupEphemeral() {
 		}
 
 		if len(keys) == 0 {
-			batchCancel()
 			break
 		}
 
@@ -346,15 +345,15 @@ func (s *Scheduler) cleanupEphemeral() {
 		for _, key := range keys {
 			select {
 			case <-s.ctx.Done():
-				batchCancel()
 				return
 			default:
-				if err := s.store.Delete(batchCtx, key); err != nil {
+				delCtx, delCancel := context.WithTimeout(s.ctx, 5*time.Second)
+				if err := s.store.Delete(delCtx, key); err != nil {
 					logger.Log.Warn().Str("key", key).Err(err).Msg("Failed to delete expired ephemeral file from R2")
 				}
+				delCancel()
 			}
 		}
-		batchCancel()
 
 		// If returned batch is smaller than 100, whole backlog is drained
 		if len(keys) < 100 {
