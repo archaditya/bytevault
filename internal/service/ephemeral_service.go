@@ -270,8 +270,8 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 		return "", fmt.Errorf("failed to process download: %w", err)
 	}
 
-	// Generate 5-minute active presigned URL for browser stream
-	downloadURL, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 5*time.Minute, share.Filename, false)
+	// Generate 2-hour active presigned URL for browser stream and resumable HTTP Range
+	downloadURL, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 2*time.Hour, share.Filename, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate download link: %w", err)
 	}
@@ -279,9 +279,9 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 	if shouldBurn {
 		// Mark BURNED in DB immediately so no SECOND request can generate a presigned URL
 		_ = s.repo.MarkBurned(ctx, share.ID)
-		// Delay physical R2 storage deletion by 5 minutes so active download streams cleanly
+		// Delay physical R2 storage deletion by 2 hours so active/resumed download streams cleanly
 		go func(storageKey string) {
-			time.Sleep(5 * time.Minute)
+			time.Sleep(2 * time.Hour)
 			bgCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			_ = s.storage.Delete(bgCtx, storageKey)

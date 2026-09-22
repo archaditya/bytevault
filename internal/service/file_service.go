@@ -572,7 +572,7 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		return "", nil, fmt.Errorf("file access blocked: security threat detected")
 	}
 
-	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 24*time.Hour, file.Filename, inline)
 
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to generate download URL: %w", err)
@@ -618,7 +618,7 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 		return "", nil, fmt.Errorf("file access blocked: security threat detected")
 	}
 
-	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Second, file.Filename, inline)
+	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 24*time.Hour, file.Filename, inline)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to download from storage: %w", err)
 	}
