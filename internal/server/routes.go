@@ -119,8 +119,14 @@ func (s *Server) registerRoutes() {
 	uploadInviteRepo := repository.NewUploadInviteRepository(s.db)
 	uploadInviteService := service.NewUploadInviteService(uploadInviteRepo, folderRepo, fileService, notifService, userRepo, redisQueue)
 
+	// API Keys (Developer Platform)
+	apiKeyRepo := repository.NewAPIKeyRepository(s.db)
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo)
+	apiKeyLimiter := appMiddleware.NewAPIKeyRateLimiter()
+
 	// 5. Initialize Handlers
 	fileHandler := handler.NewFileHandler(fileService, s.config.Storage.LocalDir)
+	fileHandler.SetFolderService(folderService)
 	folderHandler := handler.NewFolderHandler(folderService)
 	notifHandler := handler.NewNotificationHandler(authService, notifService)
 	contactHandler := handler.NewContactHandler(contactService)
@@ -129,6 +135,7 @@ func (s *Server) registerRoutes() {
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 	moderationHandler := handler.NewModerationHandler(fileRepo, userRepo)
 	uploadInviteHandler := handler.NewUploadInviteHandler(uploadInviteService)
+	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 
 	// Subscription Handlers
 	subHandler := handler.NewSubscriptionHandler(subService, txnService, s.config.Razorpay.KeyID)
@@ -150,8 +157,8 @@ func (s *Server) registerRoutes() {
 	// Public routes
 	s.registerHealthRoutes(v1)
 
-	// Protected routes (JWT required)
-	authMiddleware := appMiddleware.Auth(authService)
+	// Protected routes (JWT or API Key required)
+	authMiddleware := appMiddleware.Auth(authService, apiKeyService, apiKeyLimiter)
 	protected := v1.Group("", authMiddleware)
 
 	// Auth routes (needs both v1 for public + protected for MFA)
@@ -169,6 +176,7 @@ func (s *Server) registerRoutes() {
 	s.registerModerationUserRoutes(protected, moderationHandler)
 	s.registerSubscriptionRoutes(v1, protected, subHandler, pkgHandler, webhookHandler)
 	s.registerUploadInviteRoutes(v1, protected, uploadInviteHandler)
+	s.registerAPIKeyRoutes(protected, apiKeyHandler)
 
 	// 7. Start Background Workers and Scheduler
 	if redisQueue != nil {
@@ -183,6 +191,7 @@ func (s *Server) registerRoutes() {
 		imageLabeler := ai.NewImageLabeler(s.config.AI)
 		nsfwDetector := ai.NewNSFWDetector(s.config.AI.HFAPIToken)
 		mediaWorker := worker.NewMediaWorker(fileRepo, userRepo, store, redisQueue, imageLabeler, nsfwDetector)
+		fileHandler.SetMediaWorker(mediaWorker)
 		mediaWorker.Start(2)
 	}
 

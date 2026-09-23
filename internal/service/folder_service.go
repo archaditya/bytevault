@@ -192,3 +192,15 @@ func (s *FolderService) DeleteFolder(ctx context.Context, id, userID string) err
 
 	return s.repo.SoftDelete(ctx, id)
 }
+
+func (s *FolderService) GetOrCreateFolder(ctx context.Context, userID, name string, parentID *string) (*model.Folder, error) {
+	existing, err := s.repo.FindByName(ctx, userID, name, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+	return s.CreateFolder(ctx, userID, name, parentID)
+}
+

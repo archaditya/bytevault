@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -11,14 +12,17 @@ import (
 	"strings"
 
 	"github.com/archaditya/bytevault/internal/model"
+	"github.com/archaditya/bytevault/internal/notification/worker"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/service"
 	"github.com/labstack/echo/v4"
 )
 
 type FileHandler struct {
-	service  *service.FileService
-	localDir string // Base dir to support direct local storage uploads
+	service       *service.FileService
+	folderService *service.FolderService
+	mediaWorker   *worker.MediaWorker
+	localDir      string // Base dir to support direct local storage uploads
 }
 
 func NewFileHandler(service *service.FileService, localDir string) *FileHandler {
@@ -26,6 +30,14 @@ func NewFileHandler(service *service.FileService, localDir string) *FileHandler 
 		service:  service,
 		localDir: localDir,
 	}
+}
+
+func (h *FileHandler) SetFolderService(fs *service.FolderService) {
+	h.folderService = fs
+}
+
+func (h *FileHandler) SetMediaWorker(mw *worker.MediaWorker) {
+	h.mediaWorker = mw
 }
 
 // POST /api/v1/files/upload-session
@@ -185,6 +197,17 @@ func (h *FileHandler) Upload(c echo.Context) error {
 		folderID = &folderIDStr
 	}
 
+	// 0. Auto-organize API uploads into a folder named after the API Key (e.g. "Dev Key" or "API Uploads")
+	if c.Get("auth_type") == "api_key" && folderID == nil && h.folderService != nil {
+		folderName := "API Uploads"
+		if keyName, ok := c.Get("api_key_name").(string); ok && strings.TrimSpace(keyName) != "" {
+			folderName = strings.TrimSpace(keyName)
+		}
+		if apiKeyFolder, err := h.folderService.GetOrCreateFolder(c.Request().Context(), userID, folderName, nil); err == nil && apiKeyFolder != nil {
+			folderID = &apiKeyFolder.ID
+		}
+	}
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return SendError(c, http.StatusBadRequest, "Missing file form field")
@@ -209,9 +232,53 @@ func (h *FileHandler) Upload(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, err.Error())
 	}
 
+	// 1. For API Key uploads (developer mode), default to public so direct raw URLs work in <img> and curl
+	isPublic := false
+	if c.Get("auth_type") == "api_key" {
+		isPublic = c.FormValue("is_public") != "false" // default true for API key uploads
+	} else {
+		isPublic = c.FormValue("is_public") == "true"
+	}
+
+	if isPublic {
+		_ = h.service.ToggleShareStatus(c.Request().Context(), fileMeta.ID, userID, true)
+		fileMeta.IsPublic = true
+	}
+
+	contentType := strings.ToLower(fileMeta.ContentType)
+	ext := strings.ToLower(filepath.Ext(fileMeta.Filename))
+	isVisual := strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") || ext == ".mp4" || ext == ".mov" || ext == ".mkv" || ext == ".pdf" || contentType == "application/pdf"
+
+	// 2. Synchronously run AI labeling, NSFW scoring, and thumbnailing if media worker is available
+	if h.mediaWorker != nil && isVisual {
+		if err := h.mediaWorker.ProcessFile(c.Request().Context(), fileMeta.ID); err == nil {
+			if updated, err := h.service.GetFileDetails(c.Request().Context(), fileMeta.ID, userID); err == nil && updated != nil {
+				fileMeta = updated
+			}
+		}
+	}
+
+	scheme := c.Scheme()
+	host := c.Request().Host
+	directURL := fmt.Sprintf("%s://%s/api/v1/files/raw/%s", scheme, host, fileMeta.ID)
+
+	var thumbnailURL *string
+	if fileMeta.ThumbnailKey != nil && *fileMeta.ThumbnailKey != "" {
+		tURL := fmt.Sprintf("%s://%s/api/v1/files/public/%s/thumbnail", scheme, host, fileMeta.ID)
+		thumbnailURL = &tURL
+		fileMeta.ThumbnailURL = thumbnailURL
+	} else if isVisual {
+		tURL := fmt.Sprintf("%s://%s/api/v1/files/public/%s/thumbnail", scheme, host, fileMeta.ID)
+		thumbnailURL = &tURL
+	}
+
 	return SendSuccess(c, http.StatusCreated, map[string]interface{}{
-		"message": "File uploaded successfully",
-		"file":    fileMeta,
+		"message":       "File uploaded successfully",
+		"file":          fileMeta,
+		"direct_url":    directURL,
+		"thumbnail_url": thumbnailURL,
+		"tags":          fileMeta.Tags,
+		"nsfw_score":    fileMeta.NSFWScore,
 	}, nil)
 }
 
@@ -238,13 +305,22 @@ func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
 
+	scheme := c.Scheme()
+	host := c.Request().Host
+	directURL := fmt.Sprintf("%s://%s/api/v1/files/raw/%s", scheme, host, fileMeta.ID)
+
 	data := map[string]interface{}{
+		"id":            fileMeta.ID,
 		"filename":      fileMeta.Filename,
 		"file_size":     fileMeta.FileSize,
 		"content_type":  fileMeta.ContentType,
 		"created_at":    fileMeta.CreatedAt,
 		"has_thumbnail": fileMeta.ThumbnailKey != nil && *fileMeta.ThumbnailKey != "",
 		"thumbnail_url": fileMeta.ThumbnailURL,
+		"direct_url":    directURL,
+		"tags":          fileMeta.Tags,
+		"nsfw_score":    fileMeta.NSFWScore,
+		"status":        fileMeta.Status,
 	}
 
 	return SendSuccess(c, http.StatusOK, data, nil)
@@ -270,6 +346,32 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	url, _, err := h.service.DownloadPublic(c.Request().Context(), fileID, inline)
 	if err != nil {
 		return SendError(c, http.StatusNotFound, err.Error())
+	}
+
+	return c.Redirect(http.StatusFound, url)
+}
+
+// ServeRaw streams or redirects directly to the raw file payload (inline by default, or attachment if download=true).
+// Perfect for developer integration in <img>, <video>, curl, or direct downloads without web UI wrappers.
+func (h *FileHandler) ServeRaw(c echo.Context) error {
+	fileID := c.Param("id")
+	inline := c.QueryParam("download") != "true"
+
+	url, file, err := h.service.DownloadPublic(c.Request().Context(), fileID, inline)
+	if err != nil {
+		// If not public, check if authorized via Bearer or API Key
+		userID, ok := c.Get("user_id").(string)
+		if !ok || userID == "" {
+			return SendError(c, http.StatusUnauthorized, "File is private or requires authorization")
+		}
+		url, file, err = h.service.Download(c.Request().Context(), fileID, userID, inline)
+		if err != nil {
+			return SendError(c, http.StatusForbidden, err.Error())
+		}
+	}
+
+	if file != nil && file.ContentType != "" {
+		c.Response().Header().Set("Content-Type", file.ContentType)
 	}
 
 	return c.Redirect(http.StatusFound, url)
@@ -418,8 +520,22 @@ func (h *FileHandler) GetDetails(c echo.Context) error {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
 
+	scheme := c.Scheme()
+	host := c.Request().Host
+	directURL := fmt.Sprintf("%s://%s/api/v1/files/raw/%s", scheme, host, file.ID)
+
+	var thumbnailURL *string
+	if file.ThumbnailKey != nil && *file.ThumbnailKey != "" {
+		tURL := fmt.Sprintf("%s://%s/api/v1/files/public/%s/thumbnail", scheme, host, file.ID)
+		thumbnailURL = &tURL
+	}
+
 	return SendSuccess(c, http.StatusOK, map[string]interface{}{
-		"file": file,
+		"file":          file,
+		"direct_url":    directURL,
+		"thumbnail_url": thumbnailURL,
+		"tags":          file.Tags,
+		"nsfw_score":    file.NSFWScore,
 	}, nil)
 }
 

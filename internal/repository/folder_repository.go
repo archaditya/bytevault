@@ -225,3 +225,44 @@ func (r *FolderRepository) SoftDelete(ctx context.Context, id string) error {
 	_, err = r.db.Exec(ctx, queryFiles, id)
 	return err
 }
+
+func (r *FolderRepository) FindByName(ctx context.Context, userID, name string, parentID *string) (*model.Folder, error) {
+	var query string
+	var args []any
+	if parentID == nil || *parentID == "" {
+		query = `
+			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+			FROM folders
+			WHERE user_id = $1 AND name = $2 AND parent_id IS NULL AND deleted_at IS NULL
+			LIMIT 1
+		`
+		args = []any{userID, name}
+	} else {
+		query = `
+			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+			FROM folders
+			WHERE user_id = $1 AND name = $2 AND parent_id = $3 AND deleted_at IS NULL
+			LIMIT 1
+		`
+		args = []any{userID, name, *parentID}
+	}
+
+	var folder model.Folder
+	err := r.db.QueryRow(ctx, query, args...).Scan(
+		&folder.ID,
+		&folder.UserID,
+		&folder.Name,
+		&folder.ParentID,
+		&folder.IsPublic,
+		&folder.CreatedAt,
+		&folder.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find folder by name: %w", err)
+	}
+	return &folder, nil
+}
+
