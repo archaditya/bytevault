@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -106,11 +109,35 @@ func (r *R2Storage) GeneratePresignedDownloadURL(ctx context.Context, storageKey
 		Key:    aws.String(storageKey),
 	}
 	if filename != "" {
-		disposition := "attachment; filename=\"" + filename + "\""
+		disposition := fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", filename, url.PathEscape(filename))
 		if inline {
-			disposition = "inline; filename=\"" + filename + "\""
+			disposition = fmt.Sprintf("inline; filename=%q; filename*=UTF-8''%s", filename, url.PathEscape(filename))
 		}
 		input.ResponseContentDisposition = aws.String(disposition)
+
+		ext := strings.ToLower(filepath.Ext(filename))
+		switch ext {
+		case ".apk":
+			input.ResponseContentType = aws.String("application/vnd.android.package-archive")
+		case ".pdf":
+			input.ResponseContentType = aws.String("application/pdf")
+		case ".zip":
+			input.ResponseContentType = aws.String("application/zip")
+		case ".png":
+			input.ResponseContentType = aws.String("image/png")
+		case ".jpg", ".jpeg":
+			input.ResponseContentType = aws.String("image/jpeg")
+		case ".mp4":
+			input.ResponseContentType = aws.String("video/mp4")
+		case ".ipa":
+			input.ResponseContentType = aws.String("application/octet-stream")
+		default:
+			if detectedType := mime.TypeByExtension(ext); detectedType != "" {
+				input.ResponseContentType = aws.String(detectedType)
+			} else {
+				input.ResponseContentType = aws.String("application/octet-stream")
+			}
+		}
 	}
 
 	req, err := r.presignClient.PresignGetObject(ctx, input, s3.WithPresignExpires(expiry))
