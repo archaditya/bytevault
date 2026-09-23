@@ -120,7 +120,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 
 	maxBytes := int64(settings.MaxFileSizeGb) * 1024 * 1024 * 1024
 	if size > maxBytes {
-		return nil, "", nil, fmt.Errorf("file size exceeds maximum allowed guest limit of %d GB", settings.MaxFileSizeGb)
+		return nil, "", nil, fmt.Errorf("file size exceeds maximum allowed guest limit of %v GB", settings.MaxFileSizeGb)
 	}
 
 	if ip != nil && *ip != "" {
