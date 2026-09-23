@@ -14,6 +14,8 @@ func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, auth
 	g.HEAD("/files/public/:id", fh.DownloadPublic)
 	g.GET("/files/public/:id/metadata", fh.GetPublicMetadata)
 	g.GET("/files/public/:id/thumbnail", fh.GetPublicThumbnail)
+	g.GET("/files/raw/:id", fh.ServeRaw)
+	g.HEAD("/files/raw/:id", fh.ServeRaw)
 
 	// Local storage direct uploads dev endpoints
 	g.PUT("/files/upload/direct", fh.UploadLocalDirect)

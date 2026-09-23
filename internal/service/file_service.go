@@ -565,11 +565,11 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.Status == "PENDING_SCAN" {
-		return "", nil, fmt.Errorf("file is undergoing background security scan")
-	}
 	if file.Status == "BLOCKED_MALWARE" {
 		return "", nil, fmt.Errorf("file access blocked: security threat detected")
+	}
+	if file.Status == "BLOCKED_NSFW" {
+		return "", nil, fmt.Errorf("file access blocked: inappropriate content detected")
 	}
 
 	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 24*time.Hour, file.Filename, inline)
@@ -611,11 +611,11 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.Status == "PENDING_SCAN" {
-		return "", nil, fmt.Errorf("file is undergoing background security scan")
-	}
 	if file.Status == "BLOCKED_MALWARE" {
 		return "", nil, fmt.Errorf("file access blocked: security threat detected")
+	}
+	if file.Status == "BLOCKED_NSFW" {
+		return "", nil, fmt.Errorf("file access blocked: inappropriate content detected")
 	}
 
 	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 24*time.Hour, file.Filename, inline)
@@ -744,6 +744,12 @@ func (s *FileService) GetFileDetails(ctx context.Context, fileID, userID string)
 	}
 	if file.UserID != userID {
 		return nil, fmt.Errorf("unauthorized")
+	}
+	if file.ThumbnailKey != nil && *file.ThumbnailKey != "" {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 1*time.Hour, "", true)
+		if err == nil {
+			file.ThumbnailURL = &url
+		}
 	}
 	return file, nil
 }
