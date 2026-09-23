@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -128,6 +129,14 @@ func (r *R2Storage) GeneratePresignedDownloadURL(ctx context.Context, storageKey
 			input.ResponseContentType = aws.String("image/jpeg")
 		case ".mp4":
 			input.ResponseContentType = aws.String("video/mp4")
+		case ".ipa":
+			input.ResponseContentType = aws.String("application/octet-stream")
+		default:
+			if detectedType := mime.TypeByExtension(ext); detectedType != "" {
+				input.ResponseContentType = aws.String(detectedType)
+			} else {
+				input.ResponseContentType = aws.String("application/octet-stream")
+			}
 		}
 	}
 
