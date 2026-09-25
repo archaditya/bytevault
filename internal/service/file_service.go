@@ -135,9 +135,29 @@ var AllowedMimeTypes = map[string]bool{
 	"application/x-xz":               true,
 	"application/vnd.apache.parquet": true,
 	"application/x-parquet":          true,
-	"application/x-sqlite3":          true,
-	"application/vnd.sqlite3":        true,
-	"application/octet-stream":       true,
+	// App Developer & Mobile Formats (Android, iOS & Packages)
+	"application/vnd.android.package-archive": true, // Android .apk
+	"application/x-apk":                      true, // Android .apk
+	"application/apk":                        true, // Android .apk
+	"application/x-authorware-bin":           true, // Android .aab
+	"application/x-itunes-ipa":               true, // iOS .ipa
+	"application/x-aar":                      true, // Android Archive .aar
+	"application/java-archive":               true, // Java / Android .jar
+	"application/x-java-archive":             true, // Java / Android .jar
+	"application/x-dex":                      true, // Dalvik Executable .dex
+	"application/x-apple-aspen-config":       true, // iOS mobileprovision
+	"application/x-newton-compatible-pkg":    true, // macOS/iOS package .pkg
+	"application/x-pkg":                      true, // macOS package .pkg
+	"application/vnd.debian.binary-package":  true, // Linux .deb
+	"application/x-deb":                      true, // Linux .deb
+	"application/x-debian-package":           true, // Linux .deb
+	"application/x-rpm":                      true, // Linux .rpm
+	"application/x-redhat-package-manager":   true, // Linux .rpm
+	"application/x-appimage":                 true, // Linux AppImage
+	"application/vnd.snap":                   true, // Linux Snap
+	"application/x-xapk":                     true, // Android XAPK
+	"application/x-zip-compressed":           true, // Windows / generic zip
+	"application/octet-stream":               true,
 }
 
 type FileService struct {
@@ -264,7 +284,7 @@ func (s *FileService) ResolveNonConflictingFilename(ctx context.Context, userID,
 	}
 }
 
-func (s *FileService) validateFile(ctx context.Context, userID string, size int64, contentType string) error {
+func (s *FileService) validateFile(ctx context.Context, userID, filename string, size int64, contentType string) error {
 	// 1. Fetch user for dynamic limits
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
@@ -298,9 +318,21 @@ func (s *FileService) validateFile(ctx context.Context, userID string, size int6
 
 	// Sanitize content type string
 	cleanContentType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// Developer, mobile app & binary package formats allowed by extension
+	isAppDevPackage := map[string]bool{
+		".apk": true, ".aab": true, ".xapk": true, ".apks": true, ".apkm": true,
+		".ipa": true, ".mobileprovision": true, ".plist": true,
+		".aar": true, ".jar": true, ".dex": true,
+		".deb": true, ".rpm": true, ".appimage": true, ".pkg": true, ".dmg": true,
+		".onnx": true, ".tflite": true, ".safetensors": true, ".pt": true, ".pth": true,
+		".bin": true, ".iso": true, ".img": true,
+		".tar": true, ".gz": true, ".tgz": true, ".bz2": true, ".xz": true, ".7z": true, ".rar": true, ".zip": true,
+	}[ext]
 
 	// 3. MIME Type Validation
-	if !AllowedMimeTypes[cleanContentType] && cleanContentType != "application/octet-stream" {
+	if !AllowedMimeTypes[cleanContentType] && cleanContentType != "application/octet-stream" && !isAppDevPackage {
 		return fmt.Errorf("unsupported file type: %s", contentType)
 	}
 
@@ -327,7 +359,7 @@ func (s *FileService) CreateUploadSession(
 	conflictAction string,
 	contentHash *string,
 ) (*model.File, string, error) {
-	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
+	if err := s.validateFile(ctx, userID, filename, size, contentType); err != nil {
 		return nil, "", err
 	}
 
@@ -494,7 +526,7 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string,
 }
 
 func (s *FileService) Upload(ctx context.Context, userID, filename string, size int64, contentType string, content io.Reader, folderID *string) (*model.File, error) {
-	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
+	if err := s.validateFile(ctx, userID, filename, size, contentType); err != nil {
 		return nil, err
 	}
 
@@ -789,7 +821,7 @@ func (s *FileService) CreateMultipartUploadSession(
 	conflictAction string,
 	contentHash *string,
 ) (*model.File, string, []map[string]interface{}, error) {
-	if err := s.validateFile(ctx, userID, size, contentType); err != nil {
+	if err := s.validateFile(ctx, userID, filename, size, contentType); err != nil {
 		return nil, "", nil, err
 	}
 
@@ -1085,15 +1117,28 @@ func areTypesCompatible(detected, declared, ext string) bool {
 		return true
 	}
 
-	// Zip containers (DOCX, XLSX, PPTX, Pages, Numbers, Keynote, EPUB, JAR, etc.)
+	// App Packages & Mobile Binaries (.apk, .aab, .ipa, .xapk, .apks, .apkm, .aar, .jar, .dex)
+	// Must be an actual archive or binary stream, never disguised text/script payload
+	appExts := map[string]bool{
+		".apk": true, ".aab": true, ".xapk": true, ".apks": true, ".apkm": true,
+		".ipa": true, ".aar": true, ".jar": true, ".dex": true,
+	}
+	if appExts[ext] {
+		if detected == "application/zip" || detected == "application/octet-stream" || detected == "application/x-zip-compressed" {
+			return true
+		}
+	}
+
+	// Zip containers (DOCX, XLSX, PPTX, Pages, Numbers, Keynote, EPUB, JAR, APK, AAB, IPA, etc.)
 	if detected == "application/zip" {
 		zipExts := map[string]bool{
 			".docx": true, ".xlsx": true, ".pptx": true,
 			".doc": true, ".xls": true, ".ppt": true,
 			".pages": true, ".numbers": true, ".key": true, ".keynote": true,
-			".epub": true, ".jar": true, ".apk": true, ".zip": true,
+			".epub": true, ".jar": true, ".apk": true, ".aab": true, ".xapk": true,
+			".apks": true, ".apkm": true, ".ipa": true, ".aar": true, ".zip": true,
 		}
-		if zipExts[ext] || strings.Contains(declared, "zip") || strings.Contains(declared, "officedocument") || strings.Contains(declared, "iwork") || strings.Contains(declared, "apple") {
+		if zipExts[ext] || strings.Contains(declared, "zip") || strings.Contains(declared, "officedocument") || strings.Contains(declared, "iwork") || strings.Contains(declared, "apple") || strings.Contains(declared, "android") || strings.Contains(declared, "package") {
 			return true
 		}
 	}
