@@ -1118,12 +1118,15 @@ func areTypesCompatible(detected, declared, ext string) bool {
 	}
 
 	// App Packages & Mobile Binaries (.apk, .aab, .ipa, .xapk, .apks, .apkm, .aar, .jar, .dex)
+	// Must be an actual archive or binary stream, never disguised text/script payload
 	appExts := map[string]bool{
 		".apk": true, ".aab": true, ".xapk": true, ".apks": true, ".apkm": true,
 		".ipa": true, ".aar": true, ".jar": true, ".dex": true,
 	}
 	if appExts[ext] {
-		return true
+		if detected == "application/zip" || detected == "application/octet-stream" || detected == "application/x-zip-compressed" {
+			return true
+		}
 	}
 
 	// Zip containers (DOCX, XLSX, PPTX, Pages, Numbers, Keynote, EPUB, JAR, APK, AAB, IPA, etc.)
