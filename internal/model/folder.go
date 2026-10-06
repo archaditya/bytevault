@@ -8,6 +8,7 @@ type Folder struct {
 	Name      string     `json:"name"`
 	ParentID  *string    `json:"parent_id,omitempty"`
 	IsPublic  bool       `json:"is_public"`
+	Views     int64      `json:"views"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"-"`
