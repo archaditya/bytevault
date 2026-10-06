@@ -59,9 +59,21 @@ func (r *FolderRepository) FindByID(ctx context.Context, id string) (*model.Fold
 
 func (r *FolderRepository) FindByIDPublic(ctx context.Context, id string) (*model.Folder, error) {
 	query := `
+		WITH RECURSIVE folder_hierarchy AS (
+			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at, 1 as depth
+			FROM folders
+			WHERE id = $1 AND deleted_at IS NULL
+			UNION ALL
+			SELECT p.id, p.user_id, p.name, p.parent_id, p.is_public, p.created_at, p.updated_at, fh.depth + 1
+			FROM folders p
+			INNER JOIN folder_hierarchy fh ON p.id = fh.parent_id
+			WHERE p.deleted_at IS NULL AND fh.depth < 10
+		)
 		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
 		FROM folders
-		WHERE id = $1 AND is_public = true AND deleted_at IS NULL
+		WHERE id = $1 
+		  AND deleted_at IS NULL 
+		  AND EXISTS (SELECT 1 FROM folder_hierarchy WHERE is_public = true)
 	`
 	var folder model.Folder
 	err := r.db.QueryRow(ctx, query, id).Scan(
@@ -80,6 +92,47 @@ func (r *FolderRepository) FindByIDPublic(ctx context.Context, id string) (*mode
 		return nil, fmt.Errorf("failed to find public folder: %w", err)
 	}
 	return &folder, nil
+}
+
+func (r *FolderRepository) GetPublicBreadcrumbs(ctx context.Context, folderID string) ([]*model.Folder, error) {
+	query := `
+		WITH RECURSIVE folder_path AS (
+			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at, 1 as depth
+			FROM folders
+			WHERE id = $1 AND deleted_at IS NULL
+			UNION ALL
+			SELECT p.id, p.user_id, p.name, p.parent_id, p.is_public, p.created_at, p.updated_at, fp.depth + 1
+			FROM folders p
+			INNER JOIN folder_path fp ON p.id = fp.parent_id
+			WHERE p.deleted_at IS NULL AND fp.depth < 10
+		)
+		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+		FROM folder_path
+		ORDER BY depth DESC
+	`
+	rows, err := r.db.Query(ctx, query, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var crumbs []*model.Folder
+	for rows.Next() {
+		var f model.Folder
+		if err := rows.Scan(
+			&f.ID,
+			&f.UserID,
+			&f.Name,
+			&f.ParentID,
+			&f.IsPublic,
+			&f.CreatedAt,
+			&f.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		crumbs = append(crumbs, &f)
+	}
+	return crumbs, nil
 }
 
 func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, parentID *string) ([]*model.Folder, error) {

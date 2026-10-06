@@ -8,6 +8,10 @@ import (
 func (s *Server) registerFolderRoutes(v1 *echo.Group, protected *echo.Group, fh *handler.FolderHandler) {
 	// Public route for folder sharing
 	v1.GET("/folders/public/:id", fh.GetPublicFolder)
+	v1.GET("/folders/public/:id/download", fh.DownloadPublicFolderZip)
+
+	// Save shared public folder directly into user's vault
+	protected.POST("/folders/public/:id/save-to-vault", fh.SavePublicFolderToVault)
 
 	// Protected routes
 	foldersGroup := protected.Group("/folders")

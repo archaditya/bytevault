@@ -171,6 +171,11 @@ type FileService struct {
 	activityRepo    *repository.ActivityRepository
 	subRepo         *repository.SubscriptionRepository
 	bandwidthRepo   *repository.BandwidthRepository
+	folderRepo      *repository.FolderRepository
+}
+
+func (s *FileService) SetFolderRepo(folderRepo *repository.FolderRepository) {
+	s.folderRepo = folderRepo
 }
 
 func (s *FileService) SetSubscriptionRepo(subRepo *repository.SubscriptionRepository) {
@@ -434,6 +439,13 @@ func (s *FileService) CreateUploadSession(
 		return nil, "", fmt.Errorf("failed to generate upload URL: %w", err)
 	}
 
+	isPublic := false
+	if folderID != nil && s.folderRepo != nil {
+		if folder, err := s.folderRepo.FindByID(ctx, *folderID); err == nil && folder != nil && folder.IsPublic {
+			isPublic = true
+		}
+	}
+
 	fileMeta := &model.File{
 		UserID:          userID,
 		Filename:        filename,
@@ -442,7 +454,7 @@ func (s *FileService) CreateUploadSession(
 		StorageKey:      storageKey,
 		FileSize:        size,
 		ContentType:     contentType,
-		IsPublic:        false,
+		IsPublic:        isPublic,
 		Status:          "UPLOADING",
 		FolderID:        folderID,
 		Tags:            cleanTags,
@@ -631,6 +643,32 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 	return url, file, nil
 }
 
+func (s *FileService) isAccessiblePublicly(ctx context.Context, file *model.File) bool {
+	if file == nil {
+		return false
+	}
+	if file.IsPublic {
+		return true
+	}
+	if file.FolderID != nil && s.folderRepo != nil {
+		currentFolderID := *file.FolderID
+		for i := 0; i < 5; i++ {
+			folder, err := s.folderRepo.FindByID(ctx, currentFolderID)
+			if err != nil || folder == nil {
+				break
+			}
+			if folder.IsPublic {
+				return true
+			}
+			if folder.ParentID == nil || *folder.ParentID == "" {
+				break
+			}
+			currentFolderID = *folder.ParentID
+		}
+	}
+	return false
+}
+
 func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline bool) (string, *model.File, error) {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
@@ -639,7 +677,7 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 	if file == nil {
 		return "", nil, fmt.Errorf("file not found")
 	}
-	if !file.IsPublic {
+	if !s.isAccessiblePublicly(ctx, file) {
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
@@ -794,7 +832,7 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 	if file == nil {
 		return nil, fmt.Errorf("file not found")
 	}
-	if !file.IsPublic {
+	if !s.isAccessiblePublicly(ctx, file) {
 		return nil, fmt.Errorf("unauthorized")
 	}
 
@@ -907,6 +945,13 @@ func (s *FileService) CreateMultipartUploadSession(
 		})
 	}
 
+	isPublicMultipart := false
+	if folderID != nil && s.folderRepo != nil {
+		if folder, err := s.folderRepo.FindByID(ctx, *folderID); err == nil && folder != nil && folder.IsPublic {
+			isPublicMultipart = true
+		}
+	}
+
 	fileMeta := &model.File{
 		UserID:          userID,
 		Filename:        filename,
@@ -915,7 +960,7 @@ func (s *FileService) CreateMultipartUploadSession(
 		StorageKey:      storageKey,
 		FileSize:        size,
 		ContentType:     contentType,
-		IsPublic:        false,
+		IsPublic:        isPublicMultipart,
 		Status:          "UPLOADING",
 		FolderID:        folderID,
 		ContentHash:     contentHash,
@@ -1205,7 +1250,7 @@ func (s *FileService) GetPublicThumbnailURL(ctx context.Context, fileID string) 
 	if err != nil || file == nil {
 		return "", fmt.Errorf("file not found")
 	}
-	if !file.IsPublic {
+	if !s.isAccessiblePublicly(ctx, file) {
 		return "", fmt.Errorf("unauthorized")
 	}
 	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
