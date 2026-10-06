@@ -323,6 +323,15 @@ func (h *FileHandler) GetPublicMetadata(c echo.Context) error {
 		"status":        fileMeta.Status,
 	}
 
+	if fileMeta.FolderID != nil && *fileMeta.FolderID != "" {
+		if h.folderService != nil {
+			if folder, _, _, _, err := h.folderService.GetPublicFolderContents(c.Request().Context(), *fileMeta.FolderID); err == nil && folder != nil {
+				data["folder_id"] = folder.ID
+				data["folder_name"] = folder.Name
+			}
+		}
+	}
+
 	return SendSuccess(c, http.StatusOK, data, nil)
 }
 

@@ -1,10 +1,15 @@
 package handler
 
 import (
+	"archive/zip"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/service"
+	"github.com/labstack/echo/v4"
 )
 
 type FolderHandler struct {
@@ -149,14 +154,98 @@ func (h *FolderHandler) ToggleShare(c echo.Context) error {
 func (h *FolderHandler) GetPublicFolder(c echo.Context) error {
 	id := c.Param("id")
 
-	folder, subfolders, files, err := h.service.GetPublicFolderContents(c.Request().Context(), id)
+	folder, subfolders, files, breadcrumbs, err := h.service.GetPublicFolderContents(c.Request().Context(), id)
 	if err != nil {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
 
+	scheme := c.Scheme()
+	host := c.Request().Host
+
+	type EnrichedPublicFile struct {
+		*model.File
+		DirectURL   string `json:"direct_url"`
+		DownloadURL string `json:"download_url"`
+	}
+
+	var enrichedFiles []EnrichedPublicFile
+	for _, f := range files {
+		enrichedFiles = append(enrichedFiles, EnrichedPublicFile{
+			File:        f,
+			DirectURL:   fmt.Sprintf("%s://%s/api/v1/files/raw/%s", scheme, host, f.ID),
+			DownloadURL: fmt.Sprintf("%s://%s/api/v1/files/public/%s?download=true", scheme, host, f.ID),
+		})
+	}
+
+	type PublicBreadcrumb struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	var crumbs []PublicBreadcrumb
+	for _, b := range breadcrumbs {
+		crumbs = append(crumbs, PublicBreadcrumb{ID: b.ID, Name: b.Name})
+	}
+
 	return SendSuccess(c, http.StatusOK, map[string]interface{}{
-		"folder":     folder,
-		"subfolders": subfolders,
-		"files":      files,
+		"folder":      folder,
+		"subfolders":  subfolders,
+		"files":       enrichedFiles,
+		"breadcrumbs": crumbs,
+		"zip_url":     fmt.Sprintf("%s://%s/api/v1/folders/public/%s/download", scheme, host, folder.ID),
 	}, nil)
 }
+
+// POST /api/v1/folders/public/:id/save-to-vault
+func (h *FolderHandler) SavePublicFolderToVault(c echo.Context) error {
+	userID, ok := c.Get("user_id").(string)
+	if !ok || userID == "" {
+		return SendError(c, http.StatusUnauthorized, "Authentication required to save folder to vault")
+	}
+	id := c.Param("id")
+
+	destFolder, count, err := h.service.SavePublicFolderToVault(c.Request().Context(), userID, id)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]interface{}{
+		"folder":       destFolder,
+		"copied_count": count,
+		"message":      fmt.Sprintf("Saved folder and %d file(s) to your Vault!", count),
+	}, nil)
+}
+
+// GET /api/v1/folders/public/:id/download
+func (h *FolderHandler) DownloadPublicFolderZip(c echo.Context) error {
+	id := c.Param("id")
+
+	folder, files, storageProvider, err := h.service.GetPublicFolderForZip(c.Request().Context(), id)
+	if err != nil {
+		return SendError(c, http.StatusNotFound, err.Error())
+	}
+
+	safeName := strings.ReplaceAll(folder.Name, "\"", "_")
+	c.Response().Header().Set("Content-Type", "application/zip")
+	c.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.zip\"", safeName))
+	c.Response().WriteHeader(http.StatusOK)
+
+	zipWriter := zip.NewWriter(c.Response().Writer)
+	defer zipWriter.Close()
+
+	for _, file := range files {
+		rc, err := storageProvider.Download(c.Request().Context(), file.StorageKey)
+		if err != nil {
+			continue
+		}
+		w, err := zipWriter.Create(file.Filename)
+		if err != nil {
+			_ = rc.Close()
+			continue
+		}
+		_, _ = io.Copy(w, rc)
+		_ = rc.Close()
+	}
+
+	return nil
+}
+

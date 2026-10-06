@@ -554,7 +554,7 @@ func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID
 	query := `
 		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
 		FROM files
-		WHERE folder_id = $1 AND status = 'READY' AND deleted_at IS NULL
+		WHERE folder_id = $1 AND (status = 'READY' OR status = 'PENDING_SCAN') AND deleted_at IS NULL
 		ORDER BY filename ASC
 	`
 	rows, err := r.db.Query(ctx, query, folderID)
@@ -591,6 +591,12 @@ func (r *FileRepository) ListPublicFilesByFolderID(ctx context.Context, folderID
 		files = append(files, &f)
 	}
 	return files, nil
+}
+
+func (r *FileRepository) UpdatePublicStatusByFolderID(ctx context.Context, folderID string, isPublic bool) error {
+	query := `UPDATE files SET is_public = $1, updated_at = NOW() WHERE folder_id = $2 AND deleted_at IS NULL`
+	_, err := r.db.Exec(ctx, query, isPublic, folderID)
+	return err
 }
 
 // UpdateNSFWScore stores the NSFW detection score for a file.

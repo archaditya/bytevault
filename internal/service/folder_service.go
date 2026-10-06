@@ -4,14 +4,22 @@ import (
 	"context"
 	"errors"
 
+	"time"
+
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/storage"
 )
 
 type FolderService struct {
 	repo         *repository.FolderRepository
 	fileRepo     *repository.FileRepository
 	activityRepo *repository.ActivityRepository
+	storage      storage.StorageProvider
+}
+
+func (s *FolderService) SetStorage(storage storage.StorageProvider) {
+	s.storage = storage
 }
 
 func NewFolderService(repo *repository.FolderRepository, fileRepo *repository.FileRepository, activityRepo *repository.ActivityRepository) *FolderService {
@@ -155,18 +163,96 @@ func (s *FolderService) ToggleShareStatus(ctx context.Context, id, userID string
 		"is_public":   isPublic,
 	})
 
-	return s.repo.UpdatePublicStatus(ctx, id, isPublic)
+	if err := s.repo.UpdatePublicStatus(ctx, id, isPublic); err != nil {
+		return err
+	}
+
+	// Also sync all files currently inside this folder to match public status
+	_ = s.fileRepo.UpdatePublicStatusByFolderID(ctx, id, isPublic)
+
+	return nil
 }
 
-func (s *FolderService) GetPublicFolderContents(ctx context.Context, folderID string) (*model.Folder, []*model.Folder, []*model.File, error) {
+func (s *FolderService) GetPublicFolderContents(ctx context.Context, folderID string) (*model.Folder, []*model.Folder, []*model.File, []*model.Folder, error) {
 	folder, err := s.repo.FindByIDPublic(ctx, folderID)
 	if err != nil || folder == nil {
-		return nil, nil, nil, errors.New("public folder not found or not shared")
+		return nil, nil, nil, nil, errors.New("public folder not found or not shared")
 	}
 
 	subfolders, err := s.repo.ListPublicSubfolders(ctx, folderID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+
+	files, err := s.fileRepo.ListPublicFilesByFolderID(ctx, folderID)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	breadcrumbs, _ := s.repo.GetPublicBreadcrumbs(ctx, folderID)
+
+	// Enrich files with presigned thumbnail URLs if storage provider is present
+	if s.storage != nil {
+		for _, f := range files {
+			if f.ThumbnailKey != nil && *f.ThumbnailKey != "" {
+				if tURL, err := s.storage.GeneratePresignedDownloadURL(ctx, *f.ThumbnailKey, 1*time.Hour, "", true); err == nil {
+					f.ThumbnailURL = &tURL
+				}
+			}
+		}
+	}
+
+	return folder, subfolders, files, breadcrumbs, nil
+}
+
+func (s *FolderService) SavePublicFolderToVault(ctx context.Context, userID, publicFolderID string) (*model.Folder, int, error) {
+	folder, _, files, _, err := s.GetPublicFolderContents(ctx, publicFolderID)
+	if err != nil || folder == nil {
+		return nil, 0, errors.New("public folder not found or not accessible")
+	}
+
+	// Create a new folder for the current user
+	newFolder, err := s.CreateFolder(ctx, userID, folder.Name, nil)
+	if err != nil {
+		newFolder, err = s.CreateFolder(ctx, userID, folder.Name+" (Imported)", nil)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	count := 0
+	for _, f := range files {
+		newFile := &model.File{
+			UserID:          userID,
+			FolderID:        &newFolder.ID,
+			Filename:        f.Filename,
+			FileSize:        f.FileSize,
+			ContentType:     f.ContentType,
+			StorageKey:      f.StorageKey,
+			StorageProvider: f.StorageProvider,
+			ThumbnailKey:    f.ThumbnailKey,
+			ContentHash:     f.ContentHash,
+			Status:          "READY",
+			IsPublic:        false,
+			Tags:            f.Tags,
+		}
+		if err := s.fileRepo.Create(ctx, newFile); err == nil {
+			count++
+		}
+	}
+
+	s.logActivity(ctx, userID, "folder.import", newFolder.ID, map[string]any{
+		"source_folder_id": publicFolderID,
+		"imported_files":   count,
+	})
+
+	return newFolder, count, nil
+}
+
+func (s *FolderService) GetPublicFolderForZip(ctx context.Context, folderID string) (*model.Folder, []*model.File, storage.StorageProvider, error) {
+	folder, err := s.repo.FindByIDPublic(ctx, folderID)
+	if err != nil || folder == nil {
+		return nil, nil, nil, errors.New("public folder not found or not shared")
 	}
 
 	files, err := s.fileRepo.ListPublicFilesByFolderID(ctx, folderID)
@@ -174,7 +260,11 @@ func (s *FolderService) GetPublicFolderContents(ctx context.Context, folderID st
 		return nil, nil, nil, err
 	}
 
-	return folder, subfolders, files, nil
+	if s.storage == nil {
+		return nil, nil, nil, errors.New("storage provider not configured")
+	}
+
+	return folder, files, s.storage, nil
 }
 
 func (s *FolderService) DeleteFolder(ctx context.Context, id, userID string) error {
