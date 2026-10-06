@@ -191,6 +191,11 @@ func (s *FolderService) GetPublicFolderContents(ctx context.Context, folderID st
 
 	breadcrumbs, _ := s.repo.GetPublicBreadcrumbs(ctx, folderID)
 
+	// Increment access/views count asynchronously
+	go func() {
+		_ = s.repo.IncrementViews(context.Background(), folderID)
+	}()
+
 	// Enrich files with presigned thumbnail URLs if storage provider is present
 	if s.storage != nil {
 		for _, f := range files {

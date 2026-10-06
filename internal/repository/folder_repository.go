@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/archaditya/bytevault/internal/model"
 )
 
@@ -20,8 +21,8 @@ func NewFolderRepository(db *pgxpool.Pool) *FolderRepository {
 
 func (r *FolderRepository) Create(ctx context.Context, folder *model.Folder) error {
 	query := `
-		INSERT INTO folders (user_id, name, parent_id, is_public, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, NOW(), NOW())
+		INSERT INTO folders (user_id, name, parent_id, is_public, views, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 0, NOW(), NOW())
 		RETURNING id, created_at, updated_at
 	`
 	return r.db.QueryRow(ctx, query,
@@ -34,7 +35,7 @@ func (r *FolderRepository) Create(ctx context.Context, folder *model.Folder) err
 
 func (r *FolderRepository) FindByID(ctx context.Context, id string) (*model.Folder, error) {
 	query := `
-		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+		SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 		FROM folders
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -45,6 +46,7 @@ func (r *FolderRepository) FindByID(ctx context.Context, id string) (*model.Fold
 		&folder.Name,
 		&folder.ParentID,
 		&folder.IsPublic,
+		&folder.Views,
 		&folder.CreatedAt,
 		&folder.UpdatedAt,
 	)
@@ -60,16 +62,16 @@ func (r *FolderRepository) FindByID(ctx context.Context, id string) (*model.Fold
 func (r *FolderRepository) FindByIDPublic(ctx context.Context, id string) (*model.Folder, error) {
 	query := `
 		WITH RECURSIVE folder_hierarchy AS (
-			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at, 1 as depth
+			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0) as views, created_at, updated_at, 1 as depth
 			FROM folders
 			WHERE id = $1 AND deleted_at IS NULL
 			UNION ALL
-			SELECT p.id, p.user_id, p.name, p.parent_id, p.is_public, p.created_at, p.updated_at, fh.depth + 1
+			SELECT p.id, p.user_id, p.name, p.parent_id, p.is_public, COALESCE(p.views, 0) as views, p.created_at, p.updated_at, fh.depth + 1
 			FROM folders p
 			INNER JOIN folder_hierarchy fh ON p.id = fh.parent_id
 			WHERE p.deleted_at IS NULL AND fh.depth < 10
 		)
-		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+		SELECT id, user_id, name, parent_id, is_public, views, created_at, updated_at
 		FROM folders
 		WHERE id = $1 
 		  AND deleted_at IS NULL 
@@ -82,6 +84,7 @@ func (r *FolderRepository) FindByIDPublic(ctx context.Context, id string) (*mode
 		&folder.Name,
 		&folder.ParentID,
 		&folder.IsPublic,
+		&folder.Views,
 		&folder.CreatedAt,
 		&folder.UpdatedAt,
 	)
@@ -97,16 +100,16 @@ func (r *FolderRepository) FindByIDPublic(ctx context.Context, id string) (*mode
 func (r *FolderRepository) GetPublicBreadcrumbs(ctx context.Context, folderID string) ([]*model.Folder, error) {
 	query := `
 		WITH RECURSIVE folder_path AS (
-			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at, 1 as depth
+			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0) as views, created_at, updated_at, 1 as depth
 			FROM folders
 			WHERE id = $1 AND deleted_at IS NULL
 			UNION ALL
-			SELECT p.id, p.user_id, p.name, p.parent_id, p.is_public, p.created_at, p.updated_at, fp.depth + 1
+			SELECT p.id, p.user_id, p.name, p.parent_id, p.is_public, COALESCE(p.views, 0) as views, p.created_at, p.updated_at, fp.depth + 1
 			FROM folders p
 			INNER JOIN folder_path fp ON p.id = fp.parent_id
 			WHERE p.deleted_at IS NULL AND fp.depth < 10
 		)
-		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+		SELECT id, user_id, name, parent_id, is_public, views, created_at, updated_at
 		FROM folder_path
 		ORDER BY depth DESC
 	`
@@ -125,6 +128,7 @@ func (r *FolderRepository) GetPublicBreadcrumbs(ctx context.Context, folderID st
 			&f.Name,
 			&f.ParentID,
 			&f.IsPublic,
+			&f.Views,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		); err != nil {
@@ -141,7 +145,7 @@ func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, pare
 
 	if parentID == nil || *parentID == "" {
 		query = `
-			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 			FROM folders
 			WHERE user_id = $1 AND parent_id IS NULL AND deleted_at IS NULL
 			ORDER BY name ASC
@@ -149,7 +153,7 @@ func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, pare
 		args = []any{userID}
 	} else {
 		query = `
-			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 			FROM folders
 			WHERE user_id = $1 AND parent_id = $2 AND deleted_at IS NULL
 			ORDER BY name ASC
@@ -172,6 +176,7 @@ func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, pare
 			&f.Name,
 			&f.ParentID,
 			&f.IsPublic,
+			&f.Views,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		)
@@ -185,7 +190,7 @@ func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, pare
 
 func (r *FolderRepository) ListPublicSubfolders(ctx context.Context, parentID string) ([]*model.Folder, error) {
 	query := `
-		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+		SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 		FROM folders
 		WHERE parent_id = $1 AND deleted_at IS NULL
 		ORDER BY name ASC
@@ -205,6 +210,7 @@ func (r *FolderRepository) ListPublicSubfolders(ctx context.Context, parentID st
 			&f.Name,
 			&f.ParentID,
 			&f.IsPublic,
+			&f.Views,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		)
@@ -218,7 +224,7 @@ func (r *FolderRepository) ListPublicSubfolders(ctx context.Context, parentID st
 
 func (r *FolderRepository) ListAllFlat(ctx context.Context, userID string) ([]*model.Folder, error) {
 	query := `
-		SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+		SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 		FROM folders
 		WHERE user_id = $1 AND deleted_at IS NULL
 		ORDER BY name ASC
@@ -238,6 +244,7 @@ func (r *FolderRepository) ListAllFlat(ctx context.Context, userID string) ([]*m
 			&f.Name,
 			&f.ParentID,
 			&f.IsPublic,
+			&f.Views,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		)
@@ -267,6 +274,12 @@ func (r *FolderRepository) UpdatePublicStatus(ctx context.Context, id string, is
 	return err
 }
 
+func (r *FolderRepository) IncrementViews(ctx context.Context, id string) error {
+	query := `UPDATE folders SET views = COALESCE(views, 0) + 1 WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, id)
+	return err
+}
+
 func (r *FolderRepository) SoftDelete(ctx context.Context, id string) error {
 	queryFolder := `UPDATE folders SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`
 	_, err := r.db.Exec(ctx, queryFolder, id)
@@ -284,7 +297,7 @@ func (r *FolderRepository) FindByName(ctx context.Context, userID, name string, 
 	var args []any
 	if parentID == nil || *parentID == "" {
 		query = `
-			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 			FROM folders
 			WHERE user_id = $1 AND name = $2 AND parent_id IS NULL AND deleted_at IS NULL
 			LIMIT 1
@@ -292,7 +305,7 @@ func (r *FolderRepository) FindByName(ctx context.Context, userID, name string, 
 		args = []any{userID, name}
 	} else {
 		query = `
-			SELECT id, user_id, name, parent_id, is_public, created_at, updated_at
+			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
 			FROM folders
 			WHERE user_id = $1 AND name = $2 AND parent_id = $3 AND deleted_at IS NULL
 			LIMIT 1
@@ -307,6 +320,7 @@ func (r *FolderRepository) FindByName(ctx context.Context, userID, name string, 
 		&folder.Name,
 		&folder.ParentID,
 		&folder.IsPublic,
+		&folder.Views,
 		&folder.CreatedAt,
 		&folder.UpdatedAt,
 	)
@@ -318,4 +332,3 @@ func (r *FolderRepository) FindByName(ctx context.Context, userID, name string, 
 	}
 	return &folder, nil
 }
-
