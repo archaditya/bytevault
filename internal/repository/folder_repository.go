@@ -145,18 +145,28 @@ func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, pare
 
 	if parentID == nil || *parentID == "" {
 		query = `
-			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
-			FROM folders
-			WHERE user_id = $1 AND parent_id IS NULL AND deleted_at IS NULL
-			ORDER BY name ASC
+			SELECT f.id, f.user_id, f.name, f.parent_id, f.is_public, COALESCE(f.views, 0),
+			       COALESCE(COUNT(fi.id), 0) AS file_count,
+			       COALESCE(SUM(fi.file_size), 0) AS total_size,
+			       f.created_at, f.updated_at
+			FROM folders f
+			LEFT JOIN files fi ON fi.folder_id = f.id AND fi.deleted_at IS NULL
+			WHERE f.user_id = $1 AND f.parent_id IS NULL AND f.deleted_at IS NULL
+			GROUP BY f.id
+			ORDER BY f.name ASC
 		`
 		args = []any{userID}
 	} else {
 		query = `
-			SELECT id, user_id, name, parent_id, is_public, COALESCE(views, 0), created_at, updated_at
-			FROM folders
-			WHERE user_id = $1 AND parent_id = $2 AND deleted_at IS NULL
-			ORDER BY name ASC
+			SELECT f.id, f.user_id, f.name, f.parent_id, f.is_public, COALESCE(f.views, 0),
+			       COALESCE(COUNT(fi.id), 0) AS file_count,
+			       COALESCE(SUM(fi.file_size), 0) AS total_size,
+			       f.created_at, f.updated_at
+			FROM folders f
+			LEFT JOIN files fi ON fi.folder_id = f.id AND fi.deleted_at IS NULL
+			WHERE f.user_id = $1 AND f.parent_id = $2 AND f.deleted_at IS NULL
+			GROUP BY f.id
+			ORDER BY f.name ASC
 		`
 		args = []any{userID, *parentID}
 	}
@@ -177,6 +187,8 @@ func (r *FolderRepository) ListByUserID(ctx context.Context, userID string, pare
 			&f.ParentID,
 			&f.IsPublic,
 			&f.Views,
+			&f.FileCount,
+			&f.TotalSize,
 			&f.CreatedAt,
 			&f.UpdatedAt,
 		)
