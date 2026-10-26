@@ -12,8 +12,9 @@ import (
 )
 
 type AuthHandler struct {
-	authService *service.AuthService
-	userRepo    *repository.UserRepository
+	authService    *service.AuthService
+	userRepo       *repository.UserRepository
+	consentService *service.ConsentService
 }
 
 func NewAuthHandler(authservice *service.AuthService, userRepo ...*repository.UserRepository) *AuthHandler {
@@ -25,13 +26,20 @@ func NewAuthHandler(authservice *service.AuthService, userRepo ...*repository.Us
 	return h
 }
 
+func (h *AuthHandler) SetConsentService(cs *service.ConsentService) {
+	h.consentService = cs
+}
+
 // POST /api/v1/auth/register
 func (h *AuthHandler) Register(c echo.Context) error {
 	var req struct {
-		Email     string `json:"email"`
-		Password  string `json:"password"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
+		Email             string `json:"email"`
+		Password          string `json:"password"`
+		FirstName         string `json:"first_name"`
+		LastName          string `json:"last_name"`
+		TermsAccepted     *bool  `json:"terms_accepted"`
+		IsAdult           *bool  `json:"is_adult"`
+		MarketingAccepted *bool  `json:"marketing_accepted"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -45,6 +53,14 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, "Password must be at least 8 characters")
 	}
 
+	// Validate DPDP compliance: user must be 18+ and accept terms/privacy
+	if req.TermsAccepted != nil && !*req.TermsAccepted {
+		return SendError(c, http.StatusBadRequest, "You must accept the Terms of Service and Privacy Policy")
+	}
+	if req.IsAdult != nil && !*req.IsAdult {
+		return SendError(c, http.StatusBadRequest, "You must confirm you are 18 years of age or older")
+	}
+
 	ip := c.RealIP()
 	ua := c.Request().UserAgent()
 
@@ -56,10 +72,61 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		return SendError(c, http.StatusInternalServerError, fmt.Sprintf("Registration failed: %v", err))
 	}
 
+	// Log affirmative consent if consentService is configured
+	if h.consentService != nil {
+		_, _ = h.consentService.RecordGrant(c.Request().Context(), user.ID, service.ConsentTypeTermsAndPrivacy, service.CurrentPolicyVersion, ip, ua)
+		if req.MarketingAccepted != nil && *req.MarketingAccepted {
+			_, _ = h.consentService.RecordGrant(c.Request().Context(), user.ID, service.ConsentTypeMarketing, service.CurrentPolicyVersion, ip, ua)
+		}
+	}
+
 	return SendSuccess(c, http.StatusCreated, map[string]any{
 		"user":   user,
 		"tokens": tokens,
 	}, nil)
+}
+
+// POST /api/v1/auth/consent
+func (h *AuthHandler) RecordConsent(c echo.Context) error {
+	if h.consentService == nil {
+		return SendError(c, http.StatusInternalServerError, "Consent service not configured")
+	}
+
+	var req struct {
+		UserID      string `json:"user_id"`
+		ConsentType string `json:"consent_type"`
+		Version     string `json:"version"`
+		Status      string `json:"status"` // "granted", "revoked"
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "Invalid request body")
+	}
+
+	if authUserID, ok := c.Get("user_id").(string); ok && authUserID != "" {
+		req.UserID = authUserID
+	}
+
+	if req.UserID == "" || req.ConsentType == "" {
+		return SendError(c, http.StatusBadRequest, "user_id and consent_type are required")
+	}
+
+	ip := c.RealIP()
+	ua := c.Request().UserAgent()
+
+	if req.Status == "revoked" {
+		if err := h.consentService.Revoke(c.Request().Context(), req.UserID, req.ConsentType); err != nil {
+			return SendError(c, http.StatusInternalServerError, "Failed to revoke consent")
+		}
+		return SendSuccess(c, http.StatusOK, map[string]string{"message": "Consent revoked"}, nil)
+	}
+
+	consent, err := h.consentService.RecordGrant(c.Request().Context(), req.UserID, req.ConsentType, req.Version, ip, ua)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to record consent")
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{"consent": consent}, nil)
 }
 
 // POST /api/v1/auth/login

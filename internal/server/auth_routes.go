@@ -8,11 +8,15 @@ import (
 )
 
 // registerAuthRoutes adds all /auth/* endpoints.
-func (s *Server) registerAuthRoutes(v1 *Group, protected *Group, authService *service.AuthService, notifHandler *handler.NotificationHandler, userRepo *repository.UserRepository) {
+func (s *Server) registerAuthRoutes(v1 *Group, protected *Group, authService *service.AuthService, notifHandler *handler.NotificationHandler, userRepo *repository.UserRepository, consentService *service.ConsentService) {
 	authHandler := handler.NewAuthHandler(authService, userRepo)
+	if consentService != nil {
+		authHandler.SetConsentService(consentService)
+	}
 
 	auth := v1.Group("/auth")
 	auth.POST("/register", authHandler.Register)
+	auth.POST("/consent", authHandler.RecordConsent)
 	auth.POST("/login", authHandler.Login)
 	auth.POST("/refresh", authHandler.Refresh)
 	auth.POST("/logout", authHandler.Logout)
@@ -25,6 +29,9 @@ func (s *Server) registerAuthRoutes(v1 *Group, protected *Group, authService *se
 
 	// MFA Public route (verify-login doesn't need JWT, uses short-lived mfa_token)
 	auth.POST("/mfa/verify-login", authHandler.MFAVerifyLogin)
+
+	// Authenticated consent management
+	protected.POST("/auth/consent", authHandler.RecordConsent)
 
 	// MFA Protected routes (require active JWT session)
 	mfa := protected.Group("/auth/mfa")

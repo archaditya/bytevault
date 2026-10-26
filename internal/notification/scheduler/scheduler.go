@@ -156,7 +156,12 @@ func (s *Scheduler) cleanup() {
 		return s.userRepo.PurgeDeletedUserFiles(ctx, fileCutoff)
 	}, ctx)
 
-	// 5. Purge orphan files and avatar images from storage
+	// 5. Purge expired pending_deletion users older than 30 days → remove custom avatars from R2 + hard delete user row
+	s.purgeStorageKeys("deleted-user avatars", func() ([]string, error) {
+		return s.userRepo.PurgeExpiredPendingDeletionUsers(ctx, fileCutoff)
+	}, ctx)
+
+	// 6. Purge orphan files and avatar images from storage
 	s.cleanupOrphans(ctx)
 }
 

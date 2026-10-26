@@ -69,6 +69,7 @@ func (s *Server) registerRoutes() {
 	verifyRepo := repository.NewEmailVerificationRepository(s.db)
 	notifRepo := repository.NewNotificationRepository(s.db)
 	contactRepo := repository.NewContactRepository(s.db)
+	consentRepo := repository.NewConsentRepository(s.db)
 
 	// Subscription Repositories
 	pkgRepo := repository.NewPackageRepository(s.db)
@@ -99,6 +100,7 @@ func (s *Server) registerRoutes() {
 	shareService := service.NewShareService(shareRepo, userRepo, fileRepo, folderRepo, activityRepo)
 	ephemeralService := service.NewEphemeralService(ephemeralRepo, ephemeralSettingRepo, store)
 	contactService := service.NewContactService(contactRepo, emailClient)
+	consentService := service.NewConsentService(consentRepo)
 
 	// Subscription Services
 	pkgService := service.NewPackageService(pkgRepo, razorpayClient)
@@ -164,10 +166,10 @@ func (s *Server) registerRoutes() {
 	protected := v1.Group("", authMiddleware)
 
 	// Auth routes (needs both v1 for public + protected for MFA)
-	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo)
+	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo, consentService)
 
 	// Delegate Route Groupings
-	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store, subRepo)
+	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store, subRepo, consentService)
 	s.registerFolderRoutes(v1, protected, folderHandler)
 	s.registerNotificationRoutes(protected, notifHandler)
 	s.registerAdminRoutes(protected, adminHandler, moderationHandler, pkgHandler)

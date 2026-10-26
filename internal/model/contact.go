@@ -14,6 +14,7 @@ type ContactQuery struct {
 	Status       string     `json:"status"` // pending, replied
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+	TicketNumber *string    `json:"ticket_number,omitempty"`
 	ReplierName  string     `json:"replier_name,omitempty"`
 	ReplierEmail string     `json:"replier_email,omitempty"`
 }
