@@ -149,23 +149,30 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string, deletedBy st
 }
 
 // SoftDeletePending marks a user account as pending deletion by the user themselves (30-day buffer)
-func (r *UserRepository) SoftDeletePending(ctx context.Context, id string) error {
+func (r *UserRepository) SoftDeletePending(
+	ctx context.Context,
+	id string,
+	deletedBy string,
+) error {
 	query := `
-		UPDATE users
-		SET deleted_at = NOW(), deleted_by = $1, status = 'pending_deletion', updated_at = NOW()
-		WHERE id = $1 AND deleted_at IS NULL
-	`
+        UPDATE users
+        SET deleted_at = NOW(),
+            deleted_by = $2,
+            status = 'pending_deletion',
+            updated_at = NOW()
+        WHERE id = $1 AND deleted_at IS NULL
+    `
 
-	result, err := r.db.Exec(ctx, query, id)
-	if err != nil {
-		return fmt.Errorf("failed to schedule account deletion: %w", err)
-	}
+    result, err := r.db.Exec(ctx, query, id, deletedBy)
+    if err != nil {
+        return fmt.Errorf("failed to schedule account deletion: %w", err)
+    }
 
-	if result.RowsAffected() == 0 {
-		return ErrUserNotFound
-	}
+    if result.RowsAffected() == 0 {
+        return ErrUserNotFound
+    }
 
-	return nil
+    return nil
 }
 
 // RestoreUser clears the deleted_at timestamp and sets status back to active upon successful recovery login
