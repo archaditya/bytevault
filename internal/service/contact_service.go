@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/notification/email"
@@ -26,7 +27,37 @@ func (s *ContactService) SubmitQuery(ctx context.Context, q *model.ContactQuery)
 	if q.Name == "" || q.Email == "" || q.Subject == "" || q.Message == "" {
 		return errors.New("name, email, subject, and message are required fields")
 	}
-	return s.contactRepo.Create(ctx, q)
+
+	// Generate statutory grievance ticket reference (PPV-GRV-XXXXXX)
+	ticket := fmt.Sprintf("PPV-GRV-%X", time.Now().UnixNano()%0xFFFFFFF)
+	q.TicketNumber = &ticket
+
+	if err := s.contactRepo.Create(ctx, q); err != nil {
+		return err
+	}
+
+	// Dispatch statutory acknowledgement email with ticket ID
+	if s.emailClient != nil {
+		go func(name, toEmail, subject, tNum string) {
+			ackSubject := fmt.Sprintf("[%s] Grievance & Query Received: %s", tNum, subject)
+			body := fmt.Sprintf(`
+				<div style="font-family: sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+					<h2 style="color: #5e6ad2; margin-top: 0;">Ticket Confirmation: %s</h2>
+					<p>Hello <strong>%s</strong>,</p>
+					<p>We have received your query regarding <strong>"%s"</strong>.</p>
+					<div style="background-color: #f3f4f6; padding: 12px 16px; border-left: 4px solid #5e6ad2; margin: 16px 0; border-radius: 4px;">
+						<strong>Reference Ticket:</strong> %s<br/>
+						<strong>Statutory SLA:</strong> Acknowledged within 48 hours &bull; Final resolution within 30 days.
+					</div>
+					<p>Our Grievance Redressal team is reviewing your message and will follow up shortly.</p>
+					<p style="font-size: 11px; color: #9ca3af; margin-top: 24px;">PushPostVault Grievance Office &bull; Digital Personal Data Protection Act (DPDP Act), 2023</p>
+				</div>
+			`, tNum, name, subject, tNum)
+			_ = s.emailClient.SendGeneric(context.Background(), toEmail, name, ackSubject, body)
+		}(q.Name, q.Email, q.Subject, ticket)
+	}
+
+	return nil
 }
 
 func (s *ContactService) ListQueries(ctx context.Context, limit, offset int) ([]*model.ContactQuery, int, error) {

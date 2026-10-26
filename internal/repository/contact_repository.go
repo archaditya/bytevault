@@ -20,11 +20,11 @@ func NewContactRepository(db *pgxpool.Pool) *ContactRepository {
 
 func (r *ContactRepository) Create(ctx context.Context, q *model.ContactQuery) error {
 	query := `
-		INSERT INTO contact_queries (name, email, subject, message, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW())
+		INSERT INTO contact_queries (name, email, subject, message, ticket_number, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
 		RETURNING id, status, created_at, updated_at
 	`
-	return r.db.QueryRow(ctx, query, q.Name, q.Email, q.Subject, q.Message).
+	return r.db.QueryRow(ctx, query, q.Name, q.Email, q.Subject, q.Message, q.TicketNumber).
 		Scan(&q.ID, &q.Status, &q.CreatedAt, &q.UpdatedAt)
 }
 
@@ -36,7 +36,7 @@ func (r *ContactRepository) ListAll(ctx context.Context, limit, offset int) ([]*
 	}
 
 	query := `
-		SELECT q.id, q.name, q.email, q.subject, q.message, q.reply, q.replied_at, q.replied_by, q.status, q.created_at, q.updated_at,
+		SELECT q.id, q.name, q.email, q.subject, q.message, q.reply, q.replied_at, q.replied_by, q.status, q.ticket_number, q.created_at, q.updated_at,
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as replier_name,
 		       COALESCE(u.email, '') as replier_email
 		FROM contact_queries q
@@ -54,7 +54,7 @@ func (r *ContactRepository) ListAll(ctx context.Context, limit, offset int) ([]*
 	for rows.Next() {
 		var q model.ContactQuery
 		err := rows.Scan(
-			&q.ID, &q.Name, &q.Email, &q.Subject, &q.Message, &q.Reply, &q.RepliedAt, &q.RepliedBy, &q.Status, &q.CreatedAt, &q.UpdatedAt,
+			&q.ID, &q.Name, &q.Email, &q.Subject, &q.Message, &q.Reply, &q.RepliedAt, &q.RepliedBy, &q.Status, &q.TicketNumber, &q.CreatedAt, &q.UpdatedAt,
 			&q.ReplierName, &q.ReplierEmail,
 		)
 		if err != nil {
@@ -67,7 +67,7 @@ func (r *ContactRepository) ListAll(ctx context.Context, limit, offset int) ([]*
 
 func (r *ContactRepository) FindByID(ctx context.Context, id string) (*model.ContactQuery, error) {
 	query := `
-		SELECT q.id, q.name, q.email, q.subject, q.message, q.reply, q.replied_at, q.replied_by, q.status, q.created_at, q.updated_at,
+		SELECT q.id, q.name, q.email, q.subject, q.message, q.reply, q.replied_at, q.replied_by, q.status, q.ticket_number, q.created_at, q.updated_at,
 		       COALESCE(u.first_name || ' ' || u.last_name, '') as replier_name,
 		       COALESCE(u.email, '') as replier_email
 		FROM contact_queries q
@@ -76,7 +76,7 @@ func (r *ContactRepository) FindByID(ctx context.Context, id string) (*model.Con
 	`
 	var q model.ContactQuery
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&q.ID, &q.Name, &q.Email, &q.Subject, &q.Message, &q.Reply, &q.RepliedAt, &q.RepliedBy, &q.Status, &q.CreatedAt, &q.UpdatedAt,
+		&q.ID, &q.Name, &q.Email, &q.Subject, &q.Message, &q.Reply, &q.RepliedAt, &q.RepliedBy, &q.Status, &q.TicketNumber, &q.CreatedAt, &q.UpdatedAt,
 		&q.ReplierName, &q.ReplierEmail,
 	)
 	if err != nil {

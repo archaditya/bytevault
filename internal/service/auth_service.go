@@ -134,7 +134,7 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 }
 
 func (s *AuthService) Login(ctx context.Context, email, password string, userAgent, ip *string) (*model.User, *TokenPair, error) {
-	user, err := s.userRepo.FindByEmail(ctx, email)
+	user, err := s.userRepo.FindByEmailForAuth(ctx, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return nil, nil, ErrInvalidCredentials
@@ -148,6 +148,30 @@ func (s *AuthService) Login(ctx context.Context, email, password string, userAge
 
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(password)); err != nil {
 		return nil, nil, ErrInvalidCredentials
+	}
+
+	// 30-day recovery buffer: if user was pending deletion and logs in within 30 days, restore account
+	if user.DeletedAt != nil {
+		if time.Since(*user.DeletedAt) > 30*24*time.Hour || (user.Status != nil && *user.Status != "pending_deletion") {
+			return nil, nil, ErrInvalidCredentials
+		}
+
+		if err := s.userRepo.RestoreUser(ctx, user.ID); err != nil {
+			return nil, nil, fmt.Errorf("failed to restore user account: %w", err)
+		}
+		user.DeletedAt = nil
+		activeStatus := "active"
+		user.Status = &activeStatus
+
+		go func(uid string) {
+			_ = s.activityRepo.Log(context.Background(), &model.ActivityLog{
+				UserID:       &uid,
+				Action:       "user.account_restored",
+				ResourceType: strPtr("user"),
+				IPAddress:    ip,
+				UserAgent:    userAgent,
+			})
+		}(user.ID)
 	}
 
 	// Get user's role and permissions
@@ -365,13 +389,13 @@ func (s *AuthService) GoogleLogin(
 	existingLink, linkErr := s.authProviderRepo.FindByProviderAndID(ctx, "google", googleSub)
 	if linkErr == nil && existingLink != nil {
 		// OAuth link found — fetch linked user
-		user, err = s.userRepo.FindByID(ctx, existingLink.UserID)
+		user, err = s.userRepo.FindByIDForAuth(ctx, existingLink.UserID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("linked user account not found: %w", err)
 		}
 	} else {
 		// STEP B: Look up user by normalized email (case-insensitive)
-		user, err = s.userRepo.FindByEmail(ctx, normalizedEmail)
+		user, err = s.userRepo.FindByEmailForAuth(ctx, normalizedEmail)
 		if err != nil {
 			if !errors.Is(err, repository.ErrUserNotFound) {
 				return nil, nil, err
@@ -407,7 +431,29 @@ func (s *AuthService) GoogleLogin(
 				user.Permissions = defaultRole.Permissions
 			}
 		} else {
-			// STEP D: Existing email/pass user found — Link Google OAuth to this user!
+			// STEP D: Existing user found
+			// If within 30-day recovery buffer, seamlessly restore account
+			if user.DeletedAt != nil {
+				if time.Since(*user.DeletedAt) > 30*24*time.Hour || (user.Status != nil && *user.Status != "pending_deletion") {
+					return nil, nil, ErrInvalidCredentials
+				}
+				if err := s.userRepo.RestoreUser(ctx, user.ID); err != nil {
+					return nil, nil, fmt.Errorf("failed to restore user account: %w", err)
+				}
+				user.DeletedAt = nil
+				activeStatus := "active"
+				user.Status = &activeStatus
+				go func(uid string) {
+					_ = s.activityRepo.Log(context.Background(), &model.ActivityLog{
+						UserID:       &uid,
+						Action:       "user.account_restored",
+						ResourceType: strPtr("user"),
+						IPAddress:    ip,
+						UserAgent:    userAgent,
+					})
+				}(user.ID)
+			}
+			// Link Google OAuth to this user!
 			updated := false
 			if (user.FirstName == nil || *user.FirstName == "") && firstName != "" {
 				user.FirstName = &firstName

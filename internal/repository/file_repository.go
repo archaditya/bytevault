@@ -817,3 +817,57 @@ func (r *FileRepository) UpdateContentHash(ctx context.Context, fileID string, h
 	_, err := r.db.Exec(ctx, query, hash, fileID)
 	return err
 }
+
+// GetAllStorageKeysByUserID returns all storage keys for files uploaded by a user.
+func (r *FileRepository) GetAllStorageKeysByUserID(ctx context.Context, userID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `SELECT storage_key FROM files WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err == nil && key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys, rows.Err()
+}
+
+// GetAllFilesMetadataByUserID returns list of file metadata for data export.
+func (r *FileRepository) GetAllFilesMetadataByUserID(ctx context.Context, userID string) ([]map[string]any, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, filename, file_size, content_type, is_public, status, created_at
+		FROM files
+		WHERE user_id = $1 AND deleted_at IS NULL
+		ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []map[string]any
+	for rows.Next() {
+		var (
+			id, filename, contentType, status string
+			fileSize int64
+			isPublic bool
+			createdAt time.Time
+		)
+		if err := rows.Scan(&id, &filename, &fileSize, &contentType, &isPublic, &status, &createdAt); err == nil {
+			list = append(list, map[string]any{
+				"id":           id,
+				"filename":     filename,
+				"file_size":    fileSize,
+				"content_type": contentType,
+				"is_public":    isPublic,
+				"status":       status,
+				"created_at":   createdAt,
+			})
+		}
+	}
+	return list, rows.Err()
+}

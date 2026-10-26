@@ -148,6 +148,114 @@ func (r *UserRepository) SoftDelete(ctx context.Context, id string, deletedBy st
 	return nil
 }
 
+// SoftDeletePending marks a user account as pending deletion by the user themselves (30-day buffer)
+func (r *UserRepository) SoftDeletePending(
+	ctx context.Context,
+	id string,
+	deletedBy string,
+) error {
+	query := `
+        UPDATE users
+        SET deleted_at = NOW(),
+            deleted_by = $2,
+            status = 'pending_deletion',
+            updated_at = NOW()
+        WHERE id = $1 AND deleted_at IS NULL
+    `
+
+    result, err := r.db.Exec(ctx, query, id, deletedBy)
+    if err != nil {
+        return fmt.Errorf("failed to schedule account deletion: %w", err)
+    }
+
+    if result.RowsAffected() == 0 {
+        return ErrUserNotFound
+    }
+
+    return nil
+}
+
+// RestoreUser clears the deleted_at timestamp and sets status back to active upon successful recovery login
+func (r *UserRepository) RestoreUser(ctx context.Context, id string) error {
+	query := `
+		UPDATE users
+		SET deleted_at = NULL, deleted_by = NULL, status = 'active', updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NOT NULL
+	`
+	_, err := r.db.Exec(ctx, query, id)
+	return err
+}
+
+// FindByEmailForAuth looks up a user by email regardless of deleted_at status to check 30-day recovery buffer eligibility
+func (r *UserRepository) FindByEmailForAuth(ctx context.Context, email string) (*model.User, error) {
+	query := `
+		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at, mfa_enabled
+		FROM users
+		WHERE LOWER(email) = LOWER($1)
+	`
+
+	var user model.User
+	err := r.db.QueryRow(ctx, query, strings.TrimSpace(email)).Scan(
+		&user.ID,
+		&user.Email,
+		&user.Password,
+		&user.FirstName,
+		&user.LastName,
+		&user.AvatarURL,
+		&user.IsVerified,
+		&user.Status,
+		&user.StorageLimitBytes,
+		&user.MaxFileSizeBytes,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&user.DeletedAt,
+		&user.MfaEnabled,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to find user by email for auth: %w", err)
+	}
+	user.HasPassword = user.Password != nil
+	return &user, nil
+}
+
+// FindByIDForAuth looks up a user by ID regardless of deleted_at status
+func (r *UserRepository) FindByIDForAuth(ctx context.Context, id string) (*model.User, error) {
+	query := `
+		SELECT id, email, password, first_name, last_name, avatar_url, is_verified, status, storage_limit_bytes, max_file_size_bytes, created_at, updated_at, deleted_at, mfa_enabled
+		FROM users
+		WHERE id = $1
+	`
+
+	var user model.User
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&user.ID,
+		&user.Email,
+		&user.Password,
+		&user.FirstName,
+		&user.LastName,
+		&user.AvatarURL,
+		&user.IsVerified,
+		&user.Status,
+		&user.StorageLimitBytes,
+		&user.MaxFileSizeBytes,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&user.DeletedAt,
+		&user.MfaEnabled,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to find user by id for auth: %w", err)
+	}
+	user.HasPassword = user.Password != nil
+	return &user, nil
+}
+
 func (r *UserRepository) ListAll(ctx context.Context, search string, status string, role string, limit, offset int) ([]model.User, int, error) {
 	var conditions []string
 	var args []any
@@ -614,4 +722,41 @@ func (r *UserRepository) HasPendingAppeal(ctx context.Context, userID string) (b
 	var count int
 	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM moderation_appeals WHERE user_id = $1 AND status = 'pending'`, userID).Scan(&count)
 	return count > 0, err
+}
+
+// Delete permanently erases the user record (and cascades related records).
+func (r *UserRepository) Delete(ctx context.Context, id string) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	return err
+}
+
+// PurgeExpiredPendingDeletionUsers hard-deletes users whose 30-day recovery buffer has expired
+func (r *UserRepository) PurgeExpiredPendingDeletionUsers(ctx context.Context, cutoff time.Time) ([]string, error) {
+	// 1. Collect non-external avatar URLs of users to be permanently purged
+	rows, err := r.db.Query(ctx, `
+		SELECT avatar_url FROM users
+		WHERE deleted_at IS NOT NULL AND deleted_at < $1 AND status = 'pending_deletion'
+		  AND avatar_url IS NOT NULL AND avatar_url != '' AND avatar_url NOT LIKE 'http%'
+	`, cutoff)
+	var avatarKeys []string
+	if err == nil {
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err == nil && key != "" {
+				avatarKeys = append(avatarKeys, key)
+			}
+		}
+		rows.Close()
+	}
+
+	// 2. Hard delete the expired user rows (foreign key CASCADE removes related database rows)
+	_, err = r.db.Exec(ctx, `
+		DELETE FROM users
+		WHERE deleted_at IS NOT NULL AND deleted_at < $1 AND status = 'pending_deletion'
+	`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hard delete expired pending deletion users: %w", err)
+	}
+
+	return avatarKeys, nil
 }

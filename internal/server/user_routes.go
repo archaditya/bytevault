@@ -1,9 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -24,6 +26,7 @@ func (s *Server) registerUserRoutes(
 	fileRepo *repository.FileRepository,
 	store storage.StorageProvider,
 	subRepo *repository.SubscriptionRepository,
+	consentService *service.ConsentService,
 ) {
 	// Public user avatar endpoint proxy
 	v1.GET("/users/:id/avatar", func(c echo.Context) error {
@@ -294,5 +297,92 @@ func (s *Server) registerUserRoutes(
 		deviceID := c.Param("id")
 		deviceRepo.Deactivate(c.Request().Context(), deviceID, userID)
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{"message": "Device removed"}, nil)
+	})
+
+	// DELETE /api/v1/me — Self-service account erasure under DPDP Act §11-14 ("Delete when done")
+	protected.DELETE("/me", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+
+		var req struct {
+			Password string `json:"password"`
+		}
+		_ = c.Bind(&req)
+
+		user, err := userRepo.FindByID(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusNotFound, "User not found")
+		}
+
+		// Verify password if user has password set
+		if user.Password != nil && *user.Password != "" {
+			if req.Password == "" {
+				return handler.SendError(c, http.StatusBadRequest, "Password confirmation is required to delete account")
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(req.Password)); err != nil {
+				return handler.SendError(c, http.StatusUnauthorized, "Incorrect password")
+			}
+		}
+
+		// 1. Invalidate all active sessions immediately
+		_ = sessionRepo.DeleteAllByUserID(c.Request().Context(), userID)
+
+		// 2. Mark account as pending deletion (soft-delete with 30-day recovery buffer)
+		if err := userRepo.SoftDeletePending(c.Request().Context(), userID, userID); err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to erase user account: "+err.Error())
+		}
+
+		return handler.SendSuccess(c, http.StatusOK, map[string]string{
+			"message": "Your account and all associated personal data have been erased.",
+		}, nil)
+	})
+
+	// GET /api/v1/me/export — Right to Access/Summary of personal data under DPDP Act §11
+	protected.GET("/me/export", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+
+		user, err := userRepo.FindByID(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusNotFound, "User not found")
+		}
+
+		devices, _ := deviceRepo.FindByUserID(c.Request().Context(), userID)
+		files, _ := fileRepo.GetAllFilesMetadataByUserID(c.Request().Context(), userID)
+
+		var consents []*model.UserConsent
+		if consentService != nil {
+			consents, _ = consentService.GetUserConsents(c.Request().Context(), userID)
+		}
+
+		exportData := map[string]any{
+			"export_timestamp": time.Now().UTC().Format(time.RFC3339),
+			"compliance":       "Digital Personal Data Protection Act, 2023 (DPDP)",
+			"fiduciary":        "PushPostVault / ByteVault",
+			"user_profile": map[string]any{
+				"id":         user.ID,
+				"email":      user.Email,
+				"first_name": user.FirstName,
+				"last_name":  user.LastName,
+				"created_at": user.CreatedAt,
+			},
+			"consents":      consents,
+			"devices":       devices,
+			"files_summary": files,
+		}
+
+		c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf("attachment; filename=\"bytevault-data-export-%s.json\"", userID))
+		return c.JSON(http.StatusOK, exportData)
+	})
+
+	// GET /api/v1/me/consents — View user consents
+	protected.GET("/me/consents", func(c echo.Context) error {
+		userID := c.Get("user_id").(string)
+		if consentService == nil {
+			return handler.SendSuccess(c, http.StatusOK, map[string]any{"consents": []any{}}, nil)
+		}
+		consents, err := consentService.GetUserConsents(c.Request().Context(), userID)
+		if err != nil {
+			return handler.SendError(c, http.StatusInternalServerError, "Failed to load consents")
+		}
+		return handler.SendSuccess(c, http.StatusOK, map[string]any{"consents": consents}, nil)
 	})
 }
