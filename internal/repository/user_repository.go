@@ -169,7 +169,7 @@ func (r *UserRepository) SoftDeletePending(
     }
 
     if result.RowsAffected() == 0 {
-		return fmt.Errorf("no rows affected while scheduling user deletion: %w", err)
+		return ErrUserNotFound
 	}
 
     return nil
@@ -188,7 +188,7 @@ func (r *UserRepository) RestoreUser(ctx context.Context, id string) error {
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("no rows affected while restoring user: %w", err)
+		return ErrUserNotFound
 	}
 
 	return nil
