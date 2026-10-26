@@ -169,8 +169,8 @@ func (r *UserRepository) SoftDeletePending(
     }
 
     if result.RowsAffected() == 0 {
-        return ErrUserNotFound
-    }
+		return ErrUserNotFound
+	}
 
     return nil
 }
@@ -182,8 +182,16 @@ func (r *UserRepository) RestoreUser(ctx context.Context, id string) error {
 		SET deleted_at = NULL, deleted_by = NULL, status = 'active', updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NOT NULL
 	`
-	_, err := r.db.Exec(ctx, query, id)
-	return err
+	result, err := r.db.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to restore user: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+
+	return nil
 }
 
 // FindByEmailForAuth looks up a user by email regardless of deleted_at status to check 30-day recovery buffer eligibility
