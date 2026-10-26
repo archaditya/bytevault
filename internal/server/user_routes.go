@@ -327,7 +327,7 @@ func (s *Server) registerUserRoutes(
 		_ = sessionRepo.DeleteAllByUserID(c.Request().Context(), userID)
 
 		// 2. Mark account as pending deletion (soft-delete with 30-day recovery buffer)
-		if err := userRepo.SoftDeletePending(c.Request().Context(), userID); err != nil {
+		if err := userRepo.SoftDeletePending(c.Request().Context(), userID, userID); err != nil {
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to erase user account: "+err.Error())
 		}
 
