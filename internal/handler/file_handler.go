@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -295,8 +296,12 @@ func (h *FileHandler) Download(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	inline := c.QueryParam("inline") == "true"
+	ctx := c.Request().Context()
+	if c.Request().Method == http.MethodHead {
+		ctx = context.WithValue(ctx, "skip_egress", true)
+	}
 
-	url, _, err := h.service.Download(c.Request().Context(), fileID, userID, inline)
+	url, _, err := h.service.Download(ctx, fileID, userID, inline)
 	if err != nil {
 		return SendError(c, http.StatusForbidden, err.Error())
 	}
@@ -359,8 +364,12 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 	fileID := c.Param("id")
 
 	inline := c.QueryParam("inline") == "true"
+	ctx := c.Request().Context()
+	if c.Request().Method == http.MethodHead {
+		ctx = context.WithValue(ctx, "skip_egress", true)
+	}
 
-	url, _, err := h.service.DownloadPublic(c.Request().Context(), fileID, inline)
+	url, _, err := h.service.DownloadPublic(ctx, fileID, inline)
 	if err != nil {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
@@ -373,15 +382,19 @@ func (h *FileHandler) DownloadPublic(c echo.Context) error {
 func (h *FileHandler) ServeRaw(c echo.Context) error {
 	fileID := c.Param("id")
 	inline := c.QueryParam("download") != "true"
+	ctx := c.Request().Context()
+	if c.Request().Method == http.MethodHead {
+		ctx = context.WithValue(ctx, "skip_egress", true)
+	}
 
-	url, file, err := h.service.DownloadPublic(c.Request().Context(), fileID, inline)
+	url, file, err := h.service.DownloadPublic(ctx, fileID, inline)
 	if err != nil {
 		// If not public, check if authorized via Bearer or API Key
 		userID, ok := c.Get("user_id").(string)
 		if !ok || userID == "" {
 			return SendError(c, http.StatusUnauthorized, "File is private or requires authorization")
 		}
-		url, file, err = h.service.Download(c.Request().Context(), fileID, userID, inline)
+		url, file, err = h.service.Download(ctx, fileID, userID, inline)
 		if err != nil {
 			return SendError(c, http.StatusForbidden, err.Error())
 		}

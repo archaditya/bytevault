@@ -167,6 +167,7 @@ func (s *Server) registerRoutes() {
 
 	// Protected routes (JWT or API Key required)
 	authMiddleware := appMiddleware.Auth(authService, apiKeyService, apiKeyLimiter)
+	optionalAuthMiddleware := appMiddleware.OptionalAuth(authService, apiKeyService, apiKeyLimiter)
 	protected := v1.Group("", authMiddleware)
 
 	// Auth routes (needs both v1 for public + protected for MFA)
@@ -178,7 +179,7 @@ func (s *Server) registerRoutes() {
 	s.registerNotificationRoutes(protected, notifHandler)
 	s.registerAdminRoutes(protected, adminHandler, moderationHandler, pkgHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
-	s.registerFileRoutes(v1, fileHandler, authMiddleware, userRepo)
+	s.registerFileRoutes(v1, fileHandler, authMiddleware, optionalAuthMiddleware, userRepo)
 	s.registerShareRoutes(protected, shareHandler)
 	s.registerEphemeralRoutes(v1, protected, ephemeralHandler)
 	s.registerModerationUserRoutes(protected, moderationHandler)
