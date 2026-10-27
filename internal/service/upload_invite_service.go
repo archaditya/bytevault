@@ -500,7 +500,7 @@ func (s *UploadInviteService) GuestCompleteUpload(ctx context.Context, token, fi
 	}
 
 	// 5. Delegate to FileService.CompleteUpload (magic byte validation, malware scan queue)
-	if err := s.fileService.CompleteUpload(ctx, fileID, invite.OwnerID, nil); err != nil {
+	if err := s.fileService.CompleteUpload(ctx, fileID, invite.OwnerID, nil, 1, 0, 0); err != nil {
 		// Release capacity on failed validation
 		_ = s.inviteRepo.ReleaseUsage(ctx, invite.ID, file.FileSize)
 		return err

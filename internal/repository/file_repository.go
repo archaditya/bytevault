@@ -54,9 +54,13 @@ func buildPrefixTsQuery(search string) string {
 }
 
 func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
+	chunkCount := file.ChunkCount
+	if chunkCount <= 0 {
+		chunkCount = 1
+	}
 	query := `
-		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, tags, content_hash, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+		INSERT INTO files (user_id, filename, storage_provider, bucket, storage_key, file_size, content_type, is_public, status, folder_id, tags, content_hash, chunk_count, upload_duration_ms, transfer_speed_bps, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
 		RETURNING id, created_at, updated_at
 	`
 	err := r.db.QueryRow(ctx, query,
@@ -72,6 +76,9 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 		file.FolderID,
 		file.Tags,
 		file.ContentHash,
+		chunkCount,
+		file.UploadDurationMs,
+		file.TransferSpeedBps,
 	).Scan(&file.ID, &file.CreatedAt, &file.UpdatedAt)
 
 	if err != nil {
@@ -80,9 +87,22 @@ func (r *FileRepository) Create(ctx context.Context, file *model.File) error {
 	return nil
 }
 
+func (r *FileRepository) UpdateUploadMetrics(ctx context.Context, fileID string, chunkCount int32, durationMs int64, speedBps int64) error {
+	query := `
+		UPDATE files
+		SET chunk_count = COALESCE(NULLIF($2, 0), chunk_count),
+		    upload_duration_ms = COALESCE(NULLIF($3, 0), upload_duration_ms),
+		    transfer_speed_bps = COALESCE(NULLIF($4, 0), transfer_speed_bps),
+		    updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := r.db.Exec(ctx, query, fileID, chunkCount, durationMs, speedBps)
+	return err
+}
+
 func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, error) {
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0), COALESCE(chunk_count, 1), COALESCE(upload_duration_ms, 0), COALESCE(transfer_speed_bps, 0)
 		FROM files
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -105,6 +125,9 @@ func (r *FileRepository) FindByID(ctx context.Context, id string) (*model.File, 
 		&file.Downloads,
 		&file.Tags,
 		&file.NSFWScore,
+		&file.ChunkCount,
+		&file.UploadDurationMs,
+		&file.TransferSpeedBps,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -175,7 +198,7 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 	}
 
 	query := `
-		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0)
+		SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0), COALESCE(chunk_count, 1), COALESCE(upload_duration_ms, 0), COALESCE(transfer_speed_bps, 0)
 		FROM files
 		WHERE ` + strings.Join(conditions, " AND ")
 
@@ -229,6 +252,9 @@ func (r *FileRepository) ListByUserID(ctx context.Context, params ListFilesParam
 			&f.Downloads,
 			&f.Tags,
 			&f.NSFWScore,
+			&f.ChunkCount,
+			&f.UploadDurationMs,
+			&f.TransferSpeedBps,
 		)
 		if err != nil {
 			return nil, "", err

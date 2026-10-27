@@ -25,9 +25,10 @@ func (s *Server) registerAdminRoutes(
 	admin.PUT("/users/:id", adminHandler.UpdateUser, appMiddleware.RequirePermission("admin:users"))
 	admin.DELETE("/users/:id", adminHandler.DeleteUser, appMiddleware.RequirePermission("admin:users"))
 
-	// Roles & Activity logs
+	// Roles & Activity logs & Compliance Audit logs
 	admin.GET("/roles", adminHandler.ListRoles, appMiddleware.RequirePermission("admin:roles"))
 	admin.GET("/activity", adminHandler.ListActivity, appMiddleware.RequirePermission("admin:activity"))
+	admin.GET("/audit-logs", adminHandler.ListAuditLogs, appMiddleware.RequirePermission("admin:users"))
 
 	// System Settings
 	admin.GET("/settings", adminHandler.GetSettings, appMiddleware.RequirePermission("admin:users"))

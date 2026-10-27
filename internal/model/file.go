@@ -35,6 +35,11 @@ type File struct {
 	// SHA-256 content hash for deduplication and integrity check
 	ContentHash     *string    `json:"content_hash,omitempty"`
 
+	// Upload performance metrics
+	ChunkCount       int32      `json:"chunk_count"`
+	UploadDurationMs int64      `json:"upload_duration_ms"`
+	TransferSpeedBps int64      `json:"transfer_speed_bps"`
+
 	// Enriched fields for user/admin views
 	OwnerName       string     `json:"owner_name,omitempty"`
 	OwnerEmail      string     `json:"owner_email,omitempty"`

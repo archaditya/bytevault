@@ -116,11 +116,19 @@ func (h *FileHandler) CompleteUpload(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	var req struct {
-		ContentHash *string `json:"content_hash,omitempty"`
+		ContentHash      *string `json:"content_hash,omitempty"`
+		ChunkCount       int32   `json:"chunk_count,omitempty"`
+		UploadDurationMs int64   `json:"upload_duration_ms,omitempty"`
+		TransferSpeedBps int64   `json:"transfer_speed_bps,omitempty"`
 	}
 	_ = c.Bind(&req)
 
-	err := h.service.CompleteUpload(c.Request().Context(), fileID, userID, req.ContentHash)
+	chunkCount := req.ChunkCount
+	if chunkCount <= 0 {
+		chunkCount = 1
+	}
+
+	err := h.service.CompleteUpload(c.Request().Context(), fileID, userID, req.ContentHash, chunkCount, req.UploadDurationMs, req.TransferSpeedBps)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, err.Error())
 	}
@@ -603,16 +611,24 @@ func (h *FileHandler) CompleteMultipartSession(c echo.Context) error {
 	userID := c.Get("user_id").(string)
 
 	var req struct {
-		UploadID    string             `json:"upload_id"`
-		Parts       []model.UploadPart `json:"parts"`
-		ContentHash *string            `json:"content_hash,omitempty"`
+		UploadID         string             `json:"upload_id"`
+		Parts            []model.UploadPart `json:"parts"`
+		ContentHash      *string            `json:"content_hash,omitempty"`
+		ChunkCount       int32              `json:"chunk_count,omitempty"`
+		UploadDurationMs int64              `json:"upload_duration_ms,omitempty"`
+		TransferSpeedBps int64              `json:"transfer_speed_bps,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.Parts) == 0 {
 		return SendError(c, http.StatusBadRequest, "Invalid completion parameters")
 	}
 
-	err := h.service.CompleteMultipartUpload(c.Request().Context(), fileID, userID, req.UploadID, req.Parts, req.ContentHash)
+	chunkCount := req.ChunkCount
+	if chunkCount <= 0 {
+		chunkCount = int32(len(req.Parts))
+	}
+
+	err := h.service.CompleteMultipartUpload(c.Request().Context(), fileID, userID, req.UploadID, req.Parts, req.ContentHash, chunkCount, req.UploadDurationMs, req.TransferSpeedBps)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, err.Error())
 	}

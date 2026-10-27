@@ -147,9 +147,13 @@ func (s *Server) registerRoutes() {
 	pkgHandler.SetSystemLogRepo(systemLogRepo)
 	webhookHandler := handler.NewWebhookHandler(razorpayClient, subRepo, pkgRepo, userRepo, subAuditRepo, txnService, auditLogger, notifService, webhookEventRepo)
 	settingRepo := repository.NewSystemSettingRepository(s.db)
+	auditLogRepo := repository.NewAuditLogRepository(s.db)
+	auditService := service.NewAuditService(auditLogRepo)
 	adminHandler.SetSettingRepository(settingRepo)
 	adminHandler.SetSubscriptionDependencies(subRepo, subService)
 	adminHandler.SetMonitoringDependencies(monitoring.GlobalTelemetry, bandwidthRepo, s.db)
+	adminHandler.SetAuditService(auditService)
+	fileService.SetAuditService(auditService)
 
 	// Static public assets (brand logos, icons, email assets)
 	s.echo.Static("/static", "public")

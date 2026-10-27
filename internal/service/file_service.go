@@ -172,6 +172,11 @@ type FileService struct {
 	subRepo         *repository.SubscriptionRepository
 	bandwidthRepo   *repository.BandwidthRepository
 	folderRepo      *repository.FolderRepository
+	auditService    *AuditService
+}
+
+func (s *FileService) SetAuditService(auditService *AuditService) {
+	s.auditService = auditService
 }
 
 func (s *FileService) SetFolderRepo(folderRepo *repository.FolderRepository) {
@@ -212,16 +217,27 @@ func NewFileService(
 }
 
 func (s *FileService) logActivity(ctx context.Context, userID, action, resourceType, resourceID string, meta map[string]any) {
-	if s.activityRepo == nil {
-		return
+	if s.activityRepo != nil {
+		_ = s.activityRepo.Log(ctx, &model.ActivityLog{
+			UserID:       &userID,
+			Action:       action,
+			ResourceType: &resourceType,
+			ResourceID:   &resourceID,
+			Metadata:     meta,
+		})
 	}
-	_ = s.activityRepo.Log(ctx, &model.ActivityLog{
-		UserID:       &userID,
-		Action:       action,
-		ResourceType: &resourceType,
-		ResourceID:   &resourceID,
-		Metadata:     meta,
-	})
+
+	if s.auditService != nil {
+		s.auditService.Log(ctx, LogInput{
+			ActorUserID:  &userID,
+			ActorType:    "user",
+			Action:       action,
+			ResourceType: resourceType,
+			ResourceID:   &resourceID,
+			Status:       "success",
+			Metadata:     meta,
+		})
+	}
 }
 
 // enqueueMediaProcessingJob safely triggers asynchronous background thumbnail generation
@@ -473,7 +489,7 @@ func (s *FileService) CreateUploadSession(
 	return fileMeta, uploadURL, nil
 }
 
-func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string, contentHash *string) error {
+func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string, contentHash *string, chunkCount int32, durationMs int64, speedBps int64) error {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
 		return err
@@ -523,6 +539,14 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string,
 		_ = s.repo.UpdateContentHash(ctx, fileID, *contentHash)
 	}
 
+	// Save upload metrics if supplied
+	if chunkCount <= 0 {
+		chunkCount = 1
+	}
+	if chunkCount > 0 || durationMs > 0 || speedBps > 0 {
+		_ = s.repo.UpdateUploadMetrics(ctx, fileID, chunkCount, durationMs, speedBps)
+	}
+
 	// Set status to PENDING_SCAN and enqueue background worker for malware scan + thumbnailing
 	if err := s.repo.UpdateStatus(ctx, fileID, "PENDING_SCAN"); err != nil {
 		return err
@@ -530,8 +554,11 @@ func (s *FileService) CompleteUpload(ctx context.Context, fileID, userID string,
 	s.enqueueMediaProcessingJob(ctx, file)
 
 	s.logActivity(ctx, userID, "file.upload_completed", "file", file.ID, map[string]any{
-		"filename":  file.Filename,
-		"file_size": file.FileSize,
+		"filename":           file.Filename,
+		"file_size":          file.FileSize,
+		"chunk_count":        chunkCount,
+		"upload_duration_ms": durationMs,
+		"transfer_speed_bps": speedBps,
 	})
 
 	return nil
@@ -980,7 +1007,7 @@ func (s *FileService) CreateMultipartUploadSession(
 	return fileMeta, uploadID, partsURLs, nil
 }
 
-func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userID string, uploadID string, parts []model.UploadPart, contentHash *string) error {
+func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userID string, uploadID string, parts []model.UploadPart, contentHash *string, chunkCount int32, durationMs int64, speedBps int64) error {
 	file, err := s.repo.FindByID(ctx, fileID)
 	if err != nil {
 		return err
@@ -1040,9 +1067,16 @@ func (s *FileService) CompleteMultipartUpload(ctx context.Context, fileID, userI
 
 	s.enqueueMediaProcessingJob(ctx, file)
 
+	if chunkCount > 0 || durationMs > 0 || speedBps > 0 {
+		_ = s.repo.UpdateUploadMetrics(ctx, fileID, chunkCount, durationMs, speedBps)
+	}
+
 	s.logActivity(ctx, userID, "file.upload_completed", "file", file.ID, map[string]any{
-		"filename":  file.Filename,
-		"file_size": file.FileSize,
+		"filename":           file.Filename,
+		"file_size":          file.FileSize,
+		"chunk_count":        chunkCount,
+		"upload_duration_ms": durationMs,
+		"transfer_speed_bps": speedBps,
 	})
 
 	return nil

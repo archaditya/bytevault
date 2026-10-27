@@ -25,6 +25,7 @@ type AdminHandler struct {
 	telemetry     *monitoring.TelemetryTracker
 	db            *pgxpool.Pool
 	settingRepo   *repository.SystemSettingRepository
+	auditService  *service.AuditService
 }
 
 func NewAdminHandler(
@@ -41,6 +42,10 @@ func NewAdminHandler(
 		activityRepo: activityRepo,
 		fileRepo:     fileRepo,
 	}
+}
+
+func (h *AdminHandler) SetAuditService(auditService *service.AuditService) {
+	h.auditService = auditService
 }
 
 func (h *AdminHandler) SetSubscriptionDependencies(subRepo *repository.SubscriptionRepository, subService *service.SubscriptionService) {
@@ -474,6 +479,72 @@ func (h *AdminHandler) UpdateSettings(c echo.Context) error {
 		return SendError(c, http.StatusInternalServerError, "Failed to update system settings")
 	}
 	return SendSuccess(c, http.StatusOK, req, nil)
+}
+
+// GET /api/v1/admin/audit-logs
+func (h *AdminHandler) ListAuditLogs(c echo.Context) error {
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	if limit <= 0 {
+		limit = 50
+	}
+	offset, _ := strconv.Atoi(c.QueryParam("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	filter := model.AuditLogFilter{
+		Limit:  limit,
+		Offset: offset,
+	}
+
+	if t := c.QueryParam("tenant_id"); t != "" {
+		filter.TenantID = &t
+	}
+	if a := c.QueryParam("actor_user_id"); a != "" {
+		filter.ActorUserID = &a
+	}
+	if act := c.QueryParam("action"); act != "" {
+		filter.Action = &act
+	}
+	if rt := c.QueryParam("resource_type"); rt != "" {
+		filter.ResourceType = &rt
+	}
+	if s := c.QueryParam("status"); s != "" {
+		filter.Status = &s
+	}
+	if start := c.QueryParam("start_date"); start != "" {
+		if t, err := time.Parse(time.RFC3339, start); err == nil {
+			filter.StartDate = &t
+		} else if t, err := time.Parse("2006-01-02", start); err == nil {
+			filter.StartDate = &t
+		}
+	}
+	if end := c.QueryParam("end_date"); end != "" {
+		if t, err := time.Parse(time.RFC3339, end); err == nil {
+			filter.EndDate = &t
+		} else if t, err := time.Parse("2006-01-02", end); err == nil {
+			filter.EndDate = &t
+		}
+	}
+
+	if h.auditService == nil {
+		return SendSuccess(c, http.StatusOK, echo.Map{
+			"audit_logs": []model.AuditLog{},
+			"total":      0,
+		}, nil)
+	}
+
+	logs, total, err := h.auditService.ListAuditLogs(c.Request().Context(), filter)
+	if err != nil {
+		return SendError(c, http.StatusInternalServerError, "Failed to list audit logs: "+err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, echo.Map{
+		"audit_logs": logs,
+		"total":      total,
+		"limit":      limit,
+		"offset":     offset,
+	}, nil)
 }
 
 
