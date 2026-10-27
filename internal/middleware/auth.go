@@ -98,3 +98,59 @@ func Auth(authService *service.AuthService, apiKeyService *service.APIKeyService
 		}
 	}
 }
+
+// OptionalAuth inspects JWT or API Key if present, populating context without failing unauthenticated requests.
+func OptionalAuth(authService *service.AuthService, apiKeyService *service.APIKeyService, apiKeyLimiter *APIKeyRateLimiter) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			var token string
+
+			xApiKey := c.Request().Header.Get("X-API-Key")
+			if xApiKey != "" {
+				token = strings.TrimSpace(xApiKey)
+			}
+
+			if token == "" {
+				authHeader := c.Request().Header.Get("Authorization")
+				if authHeader != "" {
+					parts := strings.SplitN(authHeader, " ", 2)
+					if len(parts) == 2 && (parts[0] == "Bearer" || parts[0] == "ApiKey") {
+						token = strings.TrimSpace(parts[1])
+					}
+				}
+			}
+
+			if token == "" {
+				token = c.QueryParam("token")
+			}
+
+			if token == "" {
+				return next(c)
+			}
+
+			if (strings.HasPrefix(token, "ppv_live_") || strings.HasPrefix(token, "bv_live_")) && apiKeyService != nil {
+				apiKey, err := apiKeyService.ValidateKey(c.Request().Context(), token)
+				if err == nil {
+					c.Set("user_id", apiKey.UserID)
+					c.Set("role", "user")
+					c.Set("permissions", []string{"files:read", "files:write", "files:delete", "folders:read", "folders:write"})
+					c.Set("auth_type", "api_key")
+					c.Set("api_key_id", apiKey.ID)
+					c.Set("api_key_name", apiKey.Name)
+				}
+				return next(c)
+			}
+
+			claims, err := authService.ValidateAccessToken(token)
+			if err == nil {
+				c.Set("user_id", claims.UserID)
+				c.Set("role", claims.Role)
+				c.Set("permissions", claims.Permissions)
+				c.Set("auth_type", "jwt")
+			}
+
+			return next(c)
+		}
+	}
+}
+

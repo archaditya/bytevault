@@ -8,14 +8,14 @@ import (
 )
 
 // registerFileRoutes configures endpoints related to file management.
-func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, authMiddleware echo.MiddlewareFunc, userRepo *repository.UserRepository) {
+func (s *Server) registerFileRoutes(g *echo.Group, fh *handler.FileHandler, authMiddleware echo.MiddlewareFunc, optionalAuth echo.MiddlewareFunc, userRepo *repository.UserRepository) {
 	// Public routes
 	g.GET("/files/public/:id", fh.DownloadPublic)
 	g.HEAD("/files/public/:id", fh.DownloadPublic)
 	g.GET("/files/public/:id/metadata", fh.GetPublicMetadata)
 	g.GET("/files/public/:id/thumbnail", fh.GetPublicThumbnail)
-	g.GET("/files/raw/:id", fh.ServeRaw)
-	g.HEAD("/files/raw/:id", fh.ServeRaw)
+	g.GET("/files/raw/:id", fh.ServeRaw, optionalAuth)
+	g.HEAD("/files/raw/:id", fh.ServeRaw, optionalAuth)
 
 	// Local storage direct uploads dev endpoints
 	g.PUT("/files/upload/direct", fh.UploadLocalDirect)

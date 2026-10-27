@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -173,6 +174,18 @@ type FileService struct {
 	bandwidthRepo   *repository.BandwidthRepository
 	folderRepo      *repository.FolderRepository
 	auditService    *AuditService
+	egressDedupe    sync.Map
+}
+
+func (s *FileService) shouldRecordEgress(key string) bool {
+	now := time.Now()
+	if val, ok := s.egressDedupe.Load(key); ok {
+		if lastTime, ok := val.(time.Time); ok && now.Sub(lastTime) < 30*time.Second {
+			return false
+		}
+	}
+	s.egressDedupe.Store(key, now)
+	return true
 }
 
 func (s *FileService) SetAuditService(auditService *AuditService) {
@@ -659,12 +672,15 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		_ = s.repo.IncrementDownloads(context.Background(), fID)
 	}(file.ID)
 
-	if s.bandwidthRepo != nil {
-		go func(uID string, fID string, size int64) {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = s.bandwidthRepo.RecordEgress(bgCtx, &uID, &fID, size, "file_download", "")
-		}(userID, file.ID, file.FileSize)
+	if s.bandwidthRepo != nil && ctx.Value("skip_egress") == nil {
+		dedupeKey := userID + ":" + file.ID
+		if s.shouldRecordEgress(dedupeKey) {
+			go func(uID string, fID string, size int64) {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = s.bandwidthRepo.RecordEgress(bgCtx, &uID, &fID, size, "file_download", "")
+			}(userID, file.ID, file.FileSize)
+		}
 	}
 
 	return url, file, nil
@@ -725,12 +741,15 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 		_ = s.repo.IncrementDownloads(context.Background(), file.ID)
 	}()
 
-	if s.bandwidthRepo != nil {
-		go func(fID string, size int64) {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = s.bandwidthRepo.RecordEgress(bgCtx, nil, &fID, size, "public_share", "")
-		}(file.ID, file.FileSize)
+	if s.bandwidthRepo != nil && ctx.Value("skip_egress") == nil {
+		dedupeKey := "public:" + file.ID
+		if s.shouldRecordEgress(dedupeKey) {
+			go func(fID string, size int64) {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = s.bandwidthRepo.RecordEgress(bgCtx, nil, &fID, size, "public_share", "")
+			}(file.ID, file.FileSize)
+		}
 	}
 
 	return url, file, nil

@@ -3,6 +3,7 @@ package monitoring
 import (
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,9 +75,26 @@ func (t *TelemetryTracker) Record(route string, status int, d time.Duration) {
 	}
 	stat.Count++
 	stat.TotalDurationMs += ms
-	if status >= 400 {
+	if isRouteError(route, status) {
 		stat.Errors++
 	}
+}
+
+func isRouteError(route string, status int) bool {
+	if status < 400 {
+		return false
+	}
+	if status >= 500 {
+		return true
+	}
+	// Normal auth renewals, session checks, and expected 404 resource probes are client lifecycle, not route failures
+	if status == 401 || status == 403 {
+		return false
+	}
+	if status == 404 && strings.Contains(route, "thumbnail") {
+		return false
+	}
+	return true
 }
 
 type LatencyPercentiles struct {
