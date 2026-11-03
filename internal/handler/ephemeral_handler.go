@@ -127,6 +127,29 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 	}, nil)
 }
 
+// POST /api/v1/ephemeral/refresh-part-urls/:token (Public Guest)
+func (h *EphemeralHandler) RefreshPartURLs(c echo.Context) error {
+	token := c.Param("token")
+
+	var req struct {
+		UploadID    string  `json:"upload_id"`
+		PartNumbers []int32 `json:"part_numbers"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.PartNumbers) == 0 {
+		return SendError(c, http.StatusBadRequest, "Invalid request: upload_id and part_numbers are required")
+	}
+
+	refreshedURLs, err := h.service.RefreshMultipartPartURLs(c.Request().Context(), token, req.UploadID, req.PartNumbers)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"part_urls": refreshedURLs,
+	}, nil)
+}
+
 // POST /api/v1/ephemeral/complete-multipart/:token (Public Guest)
 func (h *EphemeralHandler) CompleteMultipartSession(c echo.Context) error {
 	token := c.Param("token")

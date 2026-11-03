@@ -175,6 +175,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 	share := &model.EphemeralShare{
 		Token:        token,
 		StorageKey:   storageKey,
+		UploadID:     &uploadID,
 		Filename:     filename,
 		FileSize:     size,
 		ContentType:  contentType,
@@ -192,6 +193,43 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 	}
 
 	return share, uploadID, partURLs, nil
+}
+
+// RefreshMultipartPartURLs generates fresh presigned URLs for pending parts of an active ephemeral upload.
+func (s *EphemeralService) RefreshMultipartPartURLs(ctx context.Context, token string, uploadID string, partNumbers []int32) ([]map[string]any, error) {
+	share, err := s.repo.FindByToken(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+
+	if share.Status != "UPLOADING" {
+		return nil, fmt.Errorf("upload session is not in UPLOADING state (current status: %s)", share.Status)
+	}
+	if time.Now().After(share.ExpiresAt) {
+		return nil, fmt.Errorf("upload session has expired")
+	}
+
+	const MaxPartsAllowed = 2000
+	if len(partNumbers) == 0 || len(partNumbers) > MaxPartsAllowed {
+		return nil, fmt.Errorf("part_numbers count must be between 1 and %d", MaxPartsAllowed)
+	}
+
+	var refreshedURLs []map[string]any
+	for _, partNum := range partNumbers {
+		if partNum <= 0 || int(partNum) > MaxPartsAllowed {
+			return nil, fmt.Errorf("invalid part number: %d", partNum)
+		}
+		url, err := s.storage.GeneratePresignedUploadPartURL(ctx, share.StorageKey, uploadID, partNum, 60*time.Minute)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh presigned URL for part %d: %w", partNum, err)
+		}
+		refreshedURLs = append(refreshedURLs, map[string]any{
+			"part_number": partNum,
+			"url":         url,
+		})
+	}
+
+	return refreshedURLs, nil
 }
 
 func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token string, uploadID string, parts []model.UploadPart) error {

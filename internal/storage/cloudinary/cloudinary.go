@@ -148,3 +148,7 @@ func (c *CloudinaryStorage) CompleteMultipartUpload(ctx context.Context, storage
 func (c *CloudinaryStorage) AbortMultipartUpload(ctx context.Context, storageKey string, uploadID string) error {
 	return fmt.Errorf("multipart upload not supported for cloudinary")
 }
+
+func (c *CloudinaryStorage) AbortOrphanMultipartUploads(ctx context.Context, prefix string, olderThan time.Duration) error {
+	return nil
+}

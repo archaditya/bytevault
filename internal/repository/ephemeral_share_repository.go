@@ -11,6 +11,13 @@ import (
 
 var ErrEphemeralNotFound = errors.New("ephemeral share not found or self-destructed")
 
+type EphemeralPurgeTarget struct {
+	ID         string
+	StorageKey string
+	UploadID   *string
+	Status     string
+}
+
 type EphemeralShareRepository struct {
 	db *pgxpool.Pool
 }
@@ -21,13 +28,14 @@ func NewEphemeralShareRepository(db *pgxpool.Pool) *EphemeralShareRepository {
 
 func (r *EphemeralShareRepository) Create(ctx context.Context, share *model.EphemeralShare) error {
 	query := `
-		INSERT INTO ephemeral_shares (token, storage_key, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+		INSERT INTO ephemeral_shares (token, storage_key, upload_id, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
 		RETURNING id, created_at
 	`
 	return r.db.QueryRow(ctx, query,
 		share.Token,
 		share.StorageKey,
+		share.UploadID,
 		share.Filename,
 		share.FileSize,
 		share.ContentType,
@@ -43,13 +51,13 @@ func (r *EphemeralShareRepository) Create(ctx context.Context, share *model.Ephe
 
 func (r *EphemeralShareRepository) FindByToken(ctx context.Context, token string) (*model.EphemeralShare, error) {
 	query := `
-		SELECT id, token, storage_key, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, created_at, burned_at
+		SELECT id, token, storage_key, upload_id, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, created_at, burned_at
 		FROM ephemeral_shares
 		WHERE token = $1
 	`
 	var s model.EphemeralShare
 	err := r.db.QueryRow(ctx, query, token).Scan(
-		&s.ID, &s.Token, &s.StorageKey, &s.Filename, &s.FileSize, &s.ContentType, &s.Status,
+		&s.ID, &s.Token, &s.StorageKey, &s.UploadID, &s.Filename, &s.FileSize, &s.ContentType, &s.Status,
 		&s.MaxDownloads, &s.DownloadCount, &s.IPAddress, &s.UserAgent, &s.PasswordHash,
 		&s.ExpiresAt, &s.CreatedAt, &s.BurnedAt,
 	)
@@ -139,7 +147,7 @@ func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, o
 	return shares, total, nil
 }
 
-func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([]string, error) {
+func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([]EphemeralPurgeTarget, error) {
 	// 1. Mark past-due shares as EXPIRED
 	_, _ = r.db.Exec(ctx, `
 		UPDATE ephemeral_shares 
@@ -147,9 +155,9 @@ func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([
 		WHERE status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()
 	`)
 
-	// 2. Select storage keys of expired or burned shares that still have physical files in R2
+	// 2. Select storage keys and upload_ids of expired or burned shares that still have physical files in R2
 	query := `
-		SELECT id, storage_key
+		SELECT id, storage_key, upload_id, status
 		FROM ephemeral_shares
 		WHERE storage_key IS NOT NULL 
 		  AND storage_key != ''
@@ -166,30 +174,24 @@ func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([
 	}
 	defer rows.Close()
 
-	type shareTarget struct {
-		id  string
-		key string
-	}
-	var targets []shareTarget
+	var targets []EphemeralPurgeTarget
 	for rows.Next() {
-		var t shareTarget
-		if err := rows.Scan(&t.id, &t.key); err == nil && t.key != "" {
+		var t EphemeralPurgeTarget
+		if err := rows.Scan(&t.ID, &t.StorageKey, &t.UploadID, &t.Status); err == nil && t.StorageKey != "" {
 			targets = append(targets, t)
 		}
 	}
 
-	var keys []string
 	for _, t := range targets {
-		keys = append(keys, t.key)
 		// Clear storage_key so it is never deleted twice, keeping the audit row intact
 		_, _ = r.db.Exec(ctx, `
 			UPDATE ephemeral_shares 
 			SET storage_key = '', 
 			    status = CASE WHEN status = 'BURNED' THEN 'BURNED' ELSE 'EXPIRED' END 
 			WHERE id = $1
-		`, t.id)
+		`, t.ID)
 	}
-	return keys, nil
+	return targets, nil
 }
 
 // CountUploadsByIPInWindow counts guest uploads from an IP in the last 24 hours
@@ -203,4 +205,3 @@ func (r *EphemeralShareRepository) CountUploadsByIPInWindow(ctx context.Context,
 	err := r.db.QueryRow(ctx, query, ip).Scan(&count)
 	return count, err
 }
-

@@ -163,6 +163,13 @@ func (s *Scheduler) cleanup() {
 
 	// 6. Purge orphan files and avatar images from storage
 	s.cleanupOrphans(ctx)
+
+	// 7. Abort orphan/abandoned multipart uploads older than 2 hours in ephemeral storage
+	if s.store != nil {
+		if err := s.store.AbortOrphanMultipartUploads(ctx, "ephemeral/", 2*time.Hour); err != nil {
+			logger.Log.Warn().Err(err).Msg("Failed to sweep orphan multipart uploads in ephemeral storage")
+		}
+	}
 }
 
 func (s *Scheduler) purgeStorageKeys(label string, fetchKeys func() ([]string, error), ctx context.Context) {
@@ -333,7 +340,7 @@ func (s *Scheduler) cleanupEphemeral() {
 
 		// Fresh timeout context per batch to prevent long backlogs from aborting mid-loop
 		batchCtx, batchCancel := context.WithTimeout(s.ctx, 30*time.Second)
-		keys, err := s.ephemeralRepo.PurgeExpiredAndBurned(batchCtx)
+		targets, err := s.ephemeralRepo.PurgeExpiredAndBurned(batchCtx)
 		batchCancel()
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -342,30 +349,33 @@ func (s *Scheduler) cleanupEphemeral() {
 			return
 		}
 
-		if len(keys) == 0 {
+		if len(targets) == 0 {
 			break
 		}
 
-		logger.Log.Info().Int("count", len(keys)).Msg("Purging expired ephemeral shares from R2 storage")
-		for _, key := range keys {
+		logger.Log.Info().Int("count", len(targets)).Msg("Purging expired ephemeral shares from storage")
+		for _, target := range targets {
 			select {
 			case <-s.ctx.Done():
 				return
 			default:
 				delCtx, delCancel := context.WithTimeout(s.ctx, 5*time.Second)
-				if err := s.store.Delete(delCtx, key); err != nil {
-					logger.Log.Warn().Str("key", key).Err(err).Msg("Failed to delete expired ephemeral file from R2")
+				if target.Status == "UPLOADING" && target.UploadID != nil && *target.UploadID != "" {
+					if err := s.store.AbortMultipartUpload(delCtx, target.StorageKey, *target.UploadID); err != nil {
+						logger.Log.Warn().Str("key", target.StorageKey).Str("upload_id", *target.UploadID).Err(err).Msg("Failed to abort expired incomplete multipart upload from R2")
+					}
+				} else {
+					if err := s.store.Delete(delCtx, target.StorageKey); err != nil {
+						logger.Log.Warn().Str("key", target.StorageKey).Err(err).Msg("Failed to delete expired ephemeral file from R2")
+					}
 				}
 				delCancel()
 			}
 		}
 
 		// If returned batch is smaller than 100, whole backlog is drained
-		if len(keys) < 100 {
+		if len(targets) < 100 {
 			break
 		}
 	}
 }
-
-
-

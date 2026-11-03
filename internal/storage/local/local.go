@@ -124,3 +124,7 @@ func (l *LocalStorage) CompleteMultipartUpload(ctx context.Context, storageKey s
 func (l *LocalStorage) AbortMultipartUpload(ctx context.Context, storageKey string, uploadID string) error {
 	return fmt.Errorf("multipart upload not supported for local storage")
 }
+
+func (l *LocalStorage) AbortOrphanMultipartUploads(ctx context.Context, prefix string, olderThan time.Duration) error {
+	return nil
+}
