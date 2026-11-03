@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
@@ -14,11 +15,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type LiveProgress struct {
+	ProgressPct   int
+	UploadedBytes int64
+	UpdatedAt     time.Time
+}
+
 type EphemeralService struct {
 	repo          *repository.EphemeralShareRepository
 	settingRepo   *repository.EphemeralSettingRepository
 	storage       storage.StorageProvider
 	bandwidthRepo *repository.BandwidthRepository
+	progressMu    sync.RWMutex
+	progressMap   map[string]LiveProgress
 }
 
 func (s *EphemeralService) SetBandwidthRepo(repo *repository.BandwidthRepository) {
@@ -30,6 +39,7 @@ func NewEphemeralService(repo *repository.EphemeralShareRepository, settingRepo 
 		repo:        repo,
 		settingRepo: settingRepo,
 		storage:     storage,
+		progressMap: make(map[string]LiveProgress),
 	}
 }
 
@@ -241,6 +251,38 @@ func (s *EphemeralService) RefreshMultipartPartURLs(ctx context.Context, token s
 	return refreshedURLs, nil
 }
 
+// UpdateLiveProgress records the streaming upload progress from the sender in-memory.
+func (s *EphemeralService) UpdateLiveProgress(ctx context.Context, token string, pct int, bytes int64) error {
+	share, err := s.repo.FindByToken(ctx, token)
+	if err != nil {
+		return err
+	}
+
+	if share.Status != "UPLOADING" || time.Now().After(share.ExpiresAt) {
+		return fmt.Errorf("upload session is not active")
+	}
+
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+	if bytes < 0 {
+		bytes = 0
+	} else if bytes > share.FileSize {
+		bytes = share.FileSize
+	}
+
+	s.progressMu.Lock()
+	s.progressMap[token] = LiveProgress{
+		ProgressPct:   pct,
+		UploadedBytes: bytes,
+		UpdatedAt:     time.Now(),
+	}
+	s.progressMu.Unlock()
+	return nil
+}
+
 func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token string, uploadID string, parts []model.UploadPart) error {
 	share, err := s.repo.FindByToken(ctx, token)
 	if err != nil {
@@ -259,6 +301,10 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 	if err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
+
+	s.progressMu.Lock()
+	delete(s.progressMap, token)
+	s.progressMu.Unlock()
 
 	return s.repo.UpdateStatus(ctx, token, "ACTIVE")
 }
@@ -279,6 +325,11 @@ func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token strin
 	}
 
 	_ = s.storage.AbortMultipartUpload(ctx, share.StorageKey, uploadID)
+
+	s.progressMu.Lock()
+	delete(s.progressMap, token)
+	s.progressMu.Unlock()
+
 	return s.repo.DeleteByToken(ctx, token)
 }
 
@@ -289,6 +340,14 @@ func (s *EphemeralService) GetMetadata(ctx context.Context, token string) (*mode
 	}
 	if share.Status == "BURNED" || time.Now().After(share.ExpiresAt) {
 		return nil, repository.ErrEphemeralNotFound
+	}
+	if share.Status == "UPLOADING" {
+		s.progressMu.RLock()
+		if p, ok := s.progressMap[token]; ok {
+			share.ProgressPct = p.ProgressPct
+			share.UploadedBytes = p.UploadedBytes
+		}
+		s.progressMu.RUnlock()
 	}
 	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") {
 		url, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 1*time.Hour, "", true)

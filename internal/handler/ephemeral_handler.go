@@ -197,6 +197,24 @@ func (h *EphemeralHandler) AbortMultipartSession(c echo.Context) error {
 	}, nil)
 }
 
+// POST /api/v1/ephemeral/progress/:token (Public Guest Sender)
+func (h *EphemeralHandler) UpdateProgress(c echo.Context) error {
+	token := c.Param("token")
+	var req struct {
+		ProgressPct   int   `json:"progress_pct"`
+		UploadedBytes int64 `json:"uploaded_bytes"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "invalid progress payload")
+	}
+
+	if err := h.service.UpdateLiveProgress(c.Request().Context(), token, req.ProgressPct, req.UploadedBytes); err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{"status": "ok"}, nil)
+}
+
 // GET /api/v1/ephemeral/metadata/:token
 func (h *EphemeralHandler) GetMetadata(c echo.Context) error {
 	token := c.Param("token")

@@ -22,4 +22,6 @@ type EphemeralShare struct {
 	BurnedAt      *time.Time `json:"burned_at,omitempty"`
 	PreviewURL    *string    `json:"preview_url,omitempty"`
 	IsLive        bool       `json:"is_live"`
+	ProgressPct   int        `json:"progress_pct"`
+	UploadedBytes int64      `json:"uploaded_bytes"`
 }
