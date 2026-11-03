@@ -87,6 +87,7 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 		ContentType string  `json:"content_type"`
 		Password    *string `json:"password"`
 		PartCount   int     `json:"part_count"`
+		IsLive      bool    `json:"is_live"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -114,6 +115,7 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 		&ip,
 		&ua,
 		req.PartCount,
+		req.IsLive,
 	)
 	if err != nil {
 		return SendError(c, http.StatusBadRequest, err.Error())
@@ -124,6 +126,29 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 		"upload_id":  uploadID,
 		"part_urls":  partURLs,
 		"expires_at": share.ExpiresAt,
+	}, nil)
+}
+
+// POST /api/v1/ephemeral/refresh-part-urls/:token (Public Guest)
+func (h *EphemeralHandler) RefreshPartURLs(c echo.Context) error {
+	token := c.Param("token")
+
+	var req struct {
+		UploadID    string  `json:"upload_id"`
+		PartNumbers []int32 `json:"part_numbers"`
+	}
+
+	if err := c.Bind(&req); err != nil || req.UploadID == "" || len(req.PartNumbers) == 0 {
+		return SendError(c, http.StatusBadRequest, "Invalid request: upload_id and part_numbers are required")
+	}
+
+	refreshedURLs, err := h.service.RefreshMultipartPartURLs(c.Request().Context(), token, req.UploadID, req.PartNumbers)
+	if err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"part_urls": refreshedURLs,
 	}, nil)
 }
 
@@ -170,6 +195,24 @@ func (h *EphemeralHandler) AbortMultipartSession(c echo.Context) error {
 	return SendSuccess(c, http.StatusOK, map[string]string{
 		"message": "Multipart upload aborted",
 	}, nil)
+}
+
+// POST /api/v1/ephemeral/progress/:token (Public Guest Sender)
+func (h *EphemeralHandler) UpdateProgress(c echo.Context) error {
+	token := c.Param("token")
+	var req struct {
+		ProgressPct   int   `json:"progress_pct"`
+		UploadedBytes int64 `json:"uploaded_bytes"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return SendError(c, http.StatusBadRequest, "invalid progress payload")
+	}
+
+	if err := h.service.UpdateLiveProgress(c.Request().Context(), token, req.ProgressPct, req.UploadedBytes); err != nil {
+		return SendError(c, http.StatusBadRequest, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{"status": "ok"}, nil)
 }
 
 // GET /api/v1/ephemeral/metadata/:token

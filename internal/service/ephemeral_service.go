@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
@@ -14,11 +15,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type LiveProgress struct {
+	ProgressPct   int
+	UploadedBytes int64
+	UpdatedAt     time.Time
+}
+
 type EphemeralService struct {
 	repo          *repository.EphemeralShareRepository
 	settingRepo   *repository.EphemeralSettingRepository
 	storage       storage.StorageProvider
 	bandwidthRepo *repository.BandwidthRepository
+	progressMu    sync.RWMutex
+	progressMap   map[string]LiveProgress
 }
 
 func (s *EphemeralService) SetBandwidthRepo(repo *repository.BandwidthRepository) {
@@ -30,6 +39,7 @@ func NewEphemeralService(repo *repository.EphemeralShareRepository, settingRepo 
 		repo:        repo,
 		settingRepo: settingRepo,
 		storage:     storage,
+		progressMap: make(map[string]LiveProgress),
 	}
 }
 
@@ -94,6 +104,7 @@ func (s *EphemeralService) CreateUploadSession(ctx context.Context, filename str
 		UserAgent:    ua,
 		PasswordHash: passwordHash,
 		ExpiresAt:    time.Now().Add(ttl),
+		IsLive:       false,
 	}
 
 	if err := s.repo.Create(ctx, share); err != nil {
@@ -112,6 +123,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 	password *string,
 	ip, ua *string,
 	partCount int,
+	isLive bool,
 ) (*model.EphemeralShare, string, []map[string]any, error) {
 	settings, err := s.GetSettings(ctx)
 	if err != nil {
@@ -175,6 +187,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 	share := &model.EphemeralShare{
 		Token:        token,
 		StorageKey:   storageKey,
+		UploadID:     &uploadID,
 		Filename:     filename,
 		FileSize:     size,
 		ContentType:  contentType,
@@ -184,6 +197,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 		UserAgent:    ua,
 		PasswordHash: passwordHash,
 		ExpiresAt:    time.Now().Add(ttl),
+		IsLive:       isLive,
 	}
 
 	if err := s.repo.Create(ctx, share); err != nil {
@@ -194,6 +208,81 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 	return share, uploadID, partURLs, nil
 }
 
+// RefreshMultipartPartURLs generates fresh presigned URLs for pending parts of an active ephemeral upload.
+func (s *EphemeralService) RefreshMultipartPartURLs(ctx context.Context, token string, uploadID string, partNumbers []int32) ([]map[string]any, error) {
+	share, err := s.repo.FindByToken(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+
+	if share.Status != "UPLOADING" || time.Now().After(share.ExpiresAt) {
+		return nil, fmt.Errorf("upload session is not active or has expired")
+	}
+	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
+		return nil, fmt.Errorf("invalid upload session")
+	}
+
+	const MaxPartsAllowed = 2000
+	if len(partNumbers) == 0 || len(partNumbers) > MaxPartsAllowed {
+		return nil, fmt.Errorf("part_numbers count must be between 1 and %d", MaxPartsAllowed)
+	}
+
+	var refreshedURLs []map[string]any
+	seen := make(map[int32]struct{}, len(partNumbers))
+	for _, partNum := range partNumbers {
+		if partNum <= 0 || int(partNum) > MaxPartsAllowed {
+			return nil, fmt.Errorf("invalid part number: %d", partNum)
+		}
+		if _, duplicate := seen[partNum]; duplicate {
+			continue // Deduplicate redundant part requests
+		}
+		seen[partNum] = struct{}{}
+
+		url, err := s.storage.GeneratePresignedUploadPartURL(ctx, share.StorageKey, uploadID, partNum, 60*time.Minute)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh presigned URL for part %d: %w", partNum, err)
+		}
+		refreshedURLs = append(refreshedURLs, map[string]any{
+			"part_number": partNum,
+			"url":         url,
+		})
+	}
+
+	return refreshedURLs, nil
+}
+
+// UpdateLiveProgress records the streaming upload progress from the sender in-memory.
+func (s *EphemeralService) UpdateLiveProgress(ctx context.Context, token string, pct int, bytes int64) error {
+	share, err := s.repo.FindByToken(ctx, token)
+	if err != nil {
+		return err
+	}
+
+	if share.Status != "UPLOADING" || time.Now().After(share.ExpiresAt) {
+		return fmt.Errorf("upload session is not active")
+	}
+
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+	if bytes < 0 {
+		bytes = 0
+	} else if bytes > share.FileSize {
+		bytes = share.FileSize
+	}
+
+	s.progressMu.Lock()
+	s.progressMap[token] = LiveProgress{
+		ProgressPct:   pct,
+		UploadedBytes: bytes,
+		UpdatedAt:     time.Now(),
+	}
+	s.progressMu.Unlock()
+	return nil
+}
+
 func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token string, uploadID string, parts []model.UploadPart) error {
 	share, err := s.repo.FindByToken(ctx, token)
 	if err != nil {
@@ -201,17 +290,21 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 	}
 
 	// Guard against re-completing or completing burned/expired shares
-	if share.Status != "UPLOADING" {
-		return fmt.Errorf("upload session is not in UPLOADING state (current status: %s)", share.Status)
+	if share.Status != "UPLOADING" || time.Now().After(share.ExpiresAt) {
+		return fmt.Errorf("upload session is not active or has expired")
 	}
-	if time.Now().After(share.ExpiresAt) {
-		return fmt.Errorf("upload session has expired")
+	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
+		return fmt.Errorf("invalid upload session")
 	}
 
 	_, err = s.storage.CompleteMultipartUpload(ctx, share.StorageKey, uploadID, parts)
 	if err != nil {
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
+
+	s.progressMu.Lock()
+	delete(s.progressMap, token)
+	s.progressMu.Unlock()
 
 	return s.repo.UpdateStatus(ctx, token, "ACTIVE")
 }
@@ -225,10 +318,18 @@ func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token strin
 	// Security: Only allow aborting sessions that are actively uploading.
 	// Prevents malicious clients from deleting already completed ACTIVE shares.
 	if share.Status != "UPLOADING" {
-		return fmt.Errorf("cannot abort session: share is already %s", share.Status)
+		return fmt.Errorf("cannot abort session: upload is not active")
+	}
+	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
+		return fmt.Errorf("invalid upload session")
 	}
 
 	_ = s.storage.AbortMultipartUpload(ctx, share.StorageKey, uploadID)
+
+	s.progressMu.Lock()
+	delete(s.progressMap, token)
+	s.progressMu.Unlock()
+
 	return s.repo.DeleteByToken(ctx, token)
 }
 
@@ -239,6 +340,14 @@ func (s *EphemeralService) GetMetadata(ctx context.Context, token string) (*mode
 	}
 	if share.Status == "BURNED" || time.Now().After(share.ExpiresAt) {
 		return nil, repository.ErrEphemeralNotFound
+	}
+	if share.Status == "UPLOADING" {
+		s.progressMu.RLock()
+		if p, ok := s.progressMap[token]; ok {
+			share.ProgressPct = p.ProgressPct
+			share.UploadedBytes = p.UploadedBytes
+		}
+		s.progressMu.RUnlock()
 	}
 	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") {
 		url, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 1*time.Hour, "", true)
@@ -257,6 +366,10 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 
 	if share.Status == "BURNED" || time.Now().After(share.ExpiresAt) {
 		return "", repository.ErrEphemeralNotFound
+	}
+
+	if share.Status != "ACTIVE" {
+		return "", fmt.Errorf("file is still being uploaded by the sender. Please wait for completion.")
 	}
 
 	if share.PasswordHash != nil && *share.PasswordHash != "" {

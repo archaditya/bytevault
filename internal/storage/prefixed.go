@@ -81,3 +81,7 @@ func (p *PrefixedStorageProvider) CompleteMultipartUpload(ctx context.Context, s
 func (p *PrefixedStorageProvider) AbortMultipartUpload(ctx context.Context, storageKey string, uploadID string) error {
 	return p.parent.AbortMultipartUpload(ctx, p.prefix+storageKey, uploadID)
 }
+
+func (p *PrefixedStorageProvider) AbortOrphanMultipartUploads(ctx context.Context, prefix string, olderThan time.Duration) error {
+	return p.parent.AbortOrphanMultipartUploads(ctx, p.prefix+prefix, olderThan)
+}

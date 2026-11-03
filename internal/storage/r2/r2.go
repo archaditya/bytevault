@@ -227,3 +227,35 @@ func (r *R2Storage) AbortMultipartUpload(ctx context.Context, storageKey string,
 	}
 	return nil
 }
+
+func (r *R2Storage) AbortOrphanMultipartUploads(ctx context.Context, prefix string, olderThan time.Duration) error {
+	input := &s3.ListMultipartUploadsInput{
+		Bucket: aws.String(r.bucket),
+	}
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
+	}
+
+	cutoff := time.Now().Add(-olderThan)
+	for {
+		resp, err := r.client.ListMultipartUploads(ctx, input)
+		if err != nil {
+			return fmt.Errorf("failed to list multipart uploads: %w", err)
+		}
+
+		for _, upload := range resp.Uploads {
+			if upload.Initiated != nil && upload.Initiated.Before(cutoff) {
+				if upload.Key != nil && upload.UploadId != nil {
+					_ = r.AbortMultipartUpload(ctx, *upload.Key, *upload.UploadId)
+				}
+			}
+		}
+
+		if !aws.ToBool(resp.IsTruncated) {
+			break
+		}
+		input.KeyMarker = resp.NextKeyMarker
+		input.UploadIdMarker = resp.NextUploadIdMarker
+	}
+	return nil
+}

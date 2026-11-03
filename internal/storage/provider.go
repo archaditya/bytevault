@@ -27,4 +27,6 @@ type StorageProvider interface {
 	GeneratePresignedUploadPartURL(ctx context.Context, storageKey string, uploadID string, partNumber int32, expiry time.Duration) (string, error)
 	CompleteMultipartUpload(ctx context.Context, storageKey string, uploadID string, parts []model.UploadPart) (string, error)
 	AbortMultipartUpload(ctx context.Context, storagekey string, uploadId string) error
+	// AbortOrphanMultipartUploads scans and aborts uncompleted multipart uploads older than olderThan
+	AbortOrphanMultipartUploads(ctx context.Context, prefix string, olderThan time.Duration) error
 }
