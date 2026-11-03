@@ -28,8 +28,8 @@ func NewEphemeralShareRepository(db *pgxpool.Pool) *EphemeralShareRepository {
 
 func (r *EphemeralShareRepository) Create(ctx context.Context, share *model.EphemeralShare) error {
 	query := `
-		INSERT INTO ephemeral_shares (token, storage_key, upload_id, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+		INSERT INTO ephemeral_shares (token, storage_key, upload_id, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, is_live, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
 		RETURNING id, created_at
 	`
 	return r.db.QueryRow(ctx, query,
@@ -46,12 +46,13 @@ func (r *EphemeralShareRepository) Create(ctx context.Context, share *model.Ephe
 		share.UserAgent,
 		share.PasswordHash,
 		share.ExpiresAt,
+		share.IsLive,
 	).Scan(&share.ID, &share.CreatedAt)
 }
 
 func (r *EphemeralShareRepository) FindByToken(ctx context.Context, token string) (*model.EphemeralShare, error) {
 	query := `
-		SELECT id, token, storage_key, upload_id, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, created_at, burned_at
+		SELECT id, token, storage_key, upload_id, filename, file_size, content_type, status, max_downloads, download_count, ip_address, user_agent, password_hash, expires_at, is_live, created_at, burned_at
 		FROM ephemeral_shares
 		WHERE token = $1
 	`
@@ -59,7 +60,7 @@ func (r *EphemeralShareRepository) FindByToken(ctx context.Context, token string
 	err := r.db.QueryRow(ctx, query, token).Scan(
 		&s.ID, &s.Token, &s.StorageKey, &s.UploadID, &s.Filename, &s.FileSize, &s.ContentType, &s.Status,
 		&s.MaxDownloads, &s.DownloadCount, &s.IPAddress, &s.UserAgent, &s.PasswordHash,
-		&s.ExpiresAt, &s.CreatedAt, &s.BurnedAt,
+		&s.ExpiresAt, &s.IsLive, &s.CreatedAt, &s.BurnedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -122,7 +123,7 @@ func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, o
 		         WHEN status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW() THEN 'EXPIRED'
 		         ELSE status
 		       END AS status,
-		       max_downloads, download_count, ip_address, user_agent, expires_at, created_at, burned_at
+		       max_downloads, download_count, ip_address, user_agent, is_live, expires_at, created_at, burned_at
 		FROM ephemeral_shares
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -138,7 +139,7 @@ func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, o
 		var s model.EphemeralShare
 		if err := rows.Scan(
 			&s.ID, &s.Token, &s.StorageKey, &s.Filename, &s.FileSize, &s.ContentType, &s.Status,
-			&s.MaxDownloads, &s.DownloadCount, &s.IPAddress, &s.UserAgent, &s.ExpiresAt, &s.CreatedAt, &s.BurnedAt,
+			&s.MaxDownloads, &s.DownloadCount, &s.IPAddress, &s.UserAgent, &s.IsLive, &s.ExpiresAt, &s.CreatedAt, &s.BurnedAt,
 		); err != nil {
 			return nil, 0, err
 		}

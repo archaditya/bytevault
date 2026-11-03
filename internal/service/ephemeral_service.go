@@ -94,6 +94,7 @@ func (s *EphemeralService) CreateUploadSession(ctx context.Context, filename str
 		UserAgent:    ua,
 		PasswordHash: passwordHash,
 		ExpiresAt:    time.Now().Add(ttl),
+		IsLive:       false,
 	}
 
 	if err := s.repo.Create(ctx, share); err != nil {
@@ -112,6 +113,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 	password *string,
 	ip, ua *string,
 	partCount int,
+	isLive bool,
 ) (*model.EphemeralShare, string, []map[string]any, error) {
 	settings, err := s.GetSettings(ctx)
 	if err != nil {
@@ -185,6 +187,7 @@ func (s *EphemeralService) CreateMultipartUploadSession(
 		UserAgent:    ua,
 		PasswordHash: passwordHash,
 		ExpiresAt:    time.Now().Add(ttl),
+		IsLive:       isLive,
 	}
 
 	if err := s.repo.Create(ctx, share); err != nil {
@@ -202,14 +205,11 @@ func (s *EphemeralService) RefreshMultipartPartURLs(ctx context.Context, token s
 		return nil, err
 	}
 
-	if share.Status != "UPLOADING" {
-		return nil, fmt.Errorf("upload session is not in UPLOADING state (current status: %s)", share.Status)
-	}
-	if time.Now().After(share.ExpiresAt) {
-		return nil, fmt.Errorf("upload session has expired")
+	if share.Status != "UPLOADING" || time.Now().After(share.ExpiresAt) {
+		return nil, fmt.Errorf("upload session is not active or has expired")
 	}
 	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
-		return nil, fmt.Errorf("invalid upload ID for this session")
+		return nil, fmt.Errorf("invalid upload session")
 	}
 
 	const MaxPartsAllowed = 2000
@@ -218,10 +218,16 @@ func (s *EphemeralService) RefreshMultipartPartURLs(ctx context.Context, token s
 	}
 
 	var refreshedURLs []map[string]any
+	seen := make(map[int32]struct{}, len(partNumbers))
 	for _, partNum := range partNumbers {
 		if partNum <= 0 || int(partNum) > MaxPartsAllowed {
 			return nil, fmt.Errorf("invalid part number: %d", partNum)
 		}
+		if _, duplicate := seen[partNum]; duplicate {
+			continue // Deduplicate redundant part requests
+		}
+		seen[partNum] = struct{}{}
+
 		url, err := s.storage.GeneratePresignedUploadPartURL(ctx, share.StorageKey, uploadID, partNum, 60*time.Minute)
 		if err != nil {
 			return nil, fmt.Errorf("failed to refresh presigned URL for part %d: %w", partNum, err)
@@ -242,14 +248,11 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 	}
 
 	// Guard against re-completing or completing burned/expired shares
-	if share.Status != "UPLOADING" {
-		return fmt.Errorf("upload session is not in UPLOADING state (current status: %s)", share.Status)
-	}
-	if time.Now().After(share.ExpiresAt) {
-		return fmt.Errorf("upload session has expired")
+	if share.Status != "UPLOADING" || time.Now().After(share.ExpiresAt) {
+		return fmt.Errorf("upload session is not active or has expired")
 	}
 	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
-		return fmt.Errorf("invalid upload ID for this session")
+		return fmt.Errorf("invalid upload session")
 	}
 
 	_, err = s.storage.CompleteMultipartUpload(ctx, share.StorageKey, uploadID, parts)
@@ -269,10 +272,10 @@ func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token strin
 	// Security: Only allow aborting sessions that are actively uploading.
 	// Prevents malicious clients from deleting already completed ACTIVE shares.
 	if share.Status != "UPLOADING" {
-		return fmt.Errorf("cannot abort session: share is already %s", share.Status)
+		return fmt.Errorf("cannot abort session: upload is not active")
 	}
 	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
-		return fmt.Errorf("invalid upload ID for this session")
+		return fmt.Errorf("invalid upload session")
 	}
 
 	_ = s.storage.AbortMultipartUpload(ctx, share.StorageKey, uploadID)
@@ -304,6 +307,10 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 
 	if share.Status == "BURNED" || time.Now().After(share.ExpiresAt) {
 		return "", repository.ErrEphemeralNotFound
+	}
+
+	if share.Status != "ACTIVE" {
+		return "", fmt.Errorf("file is still being uploaded by the sender. Please wait for completion.")
 	}
 
 	if share.PasswordHash != nil && *share.PasswordHash != "" {

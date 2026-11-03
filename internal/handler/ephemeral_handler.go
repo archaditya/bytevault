@@ -87,6 +87,7 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 		ContentType string  `json:"content_type"`
 		Password    *string `json:"password"`
 		PartCount   int     `json:"part_count"`
+		IsLive      bool    `json:"is_live"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -114,6 +115,7 @@ func (h *EphemeralHandler) CreateMultipartSession(c echo.Context) error {
 		&ip,
 		&ua,
 		req.PartCount,
+		req.IsLive,
 	)
 	if err != nil {
 		return SendError(c, http.StatusBadRequest, err.Error())
