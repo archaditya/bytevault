@@ -208,7 +208,7 @@ func (s *EphemeralService) RefreshMultipartPartURLs(ctx context.Context, token s
 	if time.Now().After(share.ExpiresAt) {
 		return nil, fmt.Errorf("upload session has expired")
 	}
-	if share.UploadID != nil && *share.UploadID != "" && *share.UploadID != uploadID {
+	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
 		return nil, fmt.Errorf("invalid upload ID for this session")
 	}
 
@@ -248,7 +248,7 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 	if time.Now().After(share.ExpiresAt) {
 		return fmt.Errorf("upload session has expired")
 	}
-	if share.UploadID != nil && *share.UploadID != "" && *share.UploadID != uploadID {
+	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
 		return fmt.Errorf("invalid upload ID for this session")
 	}
 
@@ -271,7 +271,7 @@ func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token strin
 	if share.Status != "UPLOADING" {
 		return fmt.Errorf("cannot abort session: share is already %s", share.Status)
 	}
-	if share.UploadID != nil && *share.UploadID != "" && *share.UploadID != uploadID {
+	if share.UploadID == nil || *share.UploadID == "" || *share.UploadID != uploadID {
 		return fmt.Errorf("invalid upload ID for this session")
 	}
 
