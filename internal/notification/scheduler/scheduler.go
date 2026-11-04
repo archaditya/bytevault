@@ -309,7 +309,7 @@ func (s *Scheduler) SetUploadInviteProcessor(p UploadInviteProcessor) {
 	// Start a dedicated 10-minute ticker for batched notification flushing.
 	// The hourly cleanup handles invite expiry + abandoned upload cleanup,
 	// but notifications need a tighter loop so the owner learns about uploads quickly.
-	s.inviteTicker = time.NewTicker(10 * time.Minute)
+	s.inviteTicker = time.NewTicker(2 * time.Minute)
 	go func() {
 		for {
 			select {

@@ -186,14 +186,14 @@ func (r *UploadInviteRepository) IncrementPendingNotify(ctx context.Context, id 
 }
 
 // FlushPendingNotifications atomically reads and resets pending notification counters
-// for invites that have accumulated files since the last notification (10-minute batch window).
+// for invites that have accumulated files since the last notification (2-minute batch window).
 func (r *UploadInviteRepository) FlushPendingNotifications(ctx context.Context) ([]model.UploadInvite, []int, error) {
 	query := `
 		WITH pending AS (
 			SELECT id, owner_id, label, token, pending_notify_count
 			FROM upload_invites
 			WHERE pending_notify_count > 0
-			  AND (last_notified_at IS NULL OR last_notified_at < NOW() - INTERVAL '10 minutes')
+			  AND (last_notified_at IS NULL OR last_notified_at < NOW() - INTERVAL '2 minutes')
 			FOR UPDATE
 		),
 		updated AS (
@@ -222,6 +222,35 @@ func (r *UploadInviteRepository) FlushPendingNotifications(ctx context.Context) 
 		counts = append(counts, count)
 	}
 	return invites, counts, nil
+}
+
+// FlushPendingForInvite atomically reads and resets the pending notification counter for a single invite.
+func (r *UploadInviteRepository) FlushPendingForInvite(ctx context.Context, id string) (*model.UploadInvite, int, error) {
+	query := `
+		WITH pending AS (
+			SELECT id, owner_id, label, token, pending_notify_count
+			FROM upload_invites
+			WHERE id = $1 AND pending_notify_count > 0
+			FOR UPDATE
+		),
+		updated AS (
+			UPDATE upload_invites i
+			SET pending_notify_count = 0, last_notified_at = NOW()
+			FROM pending p
+			WHERE i.id = p.id
+		)
+		SELECT id, owner_id, label, token, pending_notify_count FROM pending`
+
+	var inv model.UploadInvite
+	var count int
+	err := r.db.QueryRow(ctx, query, id).Scan(&inv.ID, &inv.OwnerID, &inv.Label, &inv.Token, &count)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, 0, nil
+		}
+		return nil, 0, err
+	}
+	return &inv, count, nil
 }
 
 // RecordFile inserts an audit row for a file uploaded via an invite.
