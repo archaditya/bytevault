@@ -222,7 +222,7 @@ func (h *EphemeralHandler) GetMetadata(c echo.Context) error {
 	if err != nil {
 		return SendError(c, http.StatusNotFound, err.Error())
 	}
-	return SendSuccess(c, http.StatusOK, map[string]any{"share": share}, nil)
+	return SendSuccess(c, http.StatusOK, map[string]any{"share": share.ToMetadataDTO()}, nil)
 }
 
 // POST /api/v1/ephemeral/download/:token

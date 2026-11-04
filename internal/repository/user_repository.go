@@ -428,6 +428,12 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, id string, hashedPa
 	return err
 }
 
+func (r *UserRepository) ClearPassword(ctx context.Context, id string) error {
+	query := `UPDATE users SET password = NULL, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
+	_, err := r.db.Exec(ctx, query, id)
+	return err
+}
+
 func (r *UserRepository) UpdateAvatarURL(ctx context.Context, id string, avatarURL string) error {
 	query := `UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	_, err := r.db.Exec(ctx, query, id, avatarURL)

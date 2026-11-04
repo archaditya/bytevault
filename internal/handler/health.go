@@ -40,7 +40,7 @@ func (h *HealthHandler) DeepHealth(c echo.Context) error {
 		err := h.dbPool.QueryRow(ctx, "SELECT 1").Scan(&pingVal)
 		dbLatencyMs = float64(time.Since(start).Microseconds()) / 1000.0
 		if err != nil {
-			dbStatus = "unreachable: " + err.Error()
+			dbStatus = "unreachable"
 		}
 	}
 

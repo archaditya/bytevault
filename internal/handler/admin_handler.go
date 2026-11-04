@@ -241,6 +241,24 @@ func (h *AdminHandler) UpdateUser(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, "Invalid request body")
 	}
 
+	callerRole, _ := c.Get("role").(string)
+
+	// Super-admin protection: Only super_admin can modify super_admin accounts
+	if h.roleRepo != nil {
+		targetRole, err := h.roleRepo.GetUserRole(ctx, id)
+		if err == nil && targetRole != nil && targetRole.Name == "super_admin" && callerRole != "super_admin" {
+			return SendError(c, http.StatusForbidden, "Only super_admin can modify super_admin accounts")
+		}
+
+		// Super-admin protection: Only super_admin can assign the super_admin role
+		if req.RoleID != nil && *req.RoleID != "" && callerRole != "super_admin" {
+			newRole, err := h.roleRepo.FindByID(ctx, *req.RoleID)
+			if err == nil && newRole != nil && newRole.Name == "super_admin" {
+				return SendError(c, http.StatusForbidden, "Only super_admin can assign the super_admin role")
+			}
+		}
+	}
+
 	err := h.userRepo.UpdateDetails(ctx, id, req.FirstName, req.LastName, req.Status, req.IsVerified, req.StorageLimitBytes, req.MaxFileSizeBytes)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, "Failed to update user details")
@@ -272,6 +290,14 @@ func (h *AdminHandler) DeleteUser(c echo.Context) error {
 
 	if id == actorID {
 		return SendError(c, http.StatusBadRequest, "You cannot delete your own account")
+	}
+
+	callerRole, _ := c.Get("role").(string)
+	if h.roleRepo != nil {
+		targetRole, err := h.roleRepo.GetUserRole(ctx, id)
+		if err == nil && targetRole != nil && targetRole.Name == "super_admin" && callerRole != "super_admin" {
+			return SendError(c, http.StatusForbidden, "Only super_admin can delete super_admin accounts")
+		}
 	}
 
 	// 1. Invalidate all active sessions immediately so user is logged out everywhere

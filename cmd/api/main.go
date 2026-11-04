@@ -32,6 +32,11 @@ func main() {
 	logger.Init(cfg.App.Env)
 	logger.Log.Info().Msg("Configuration loaded")
 
+	// Validate production JWT secret length
+	if len(cfg.JWT.Secret) < 32 {
+		logger.Log.Fatal().Msg("FATAL: JWT_SECRET must be at least 32 characters long for production security")
+	}
+
 	// Step 3: Connect to database
 	// cfg.Database.DSN() builds the connection string from .env values
 	dbPool, err := database.New(cfg.Database.DSN())

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -36,9 +38,22 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("Role 'super_admin' not found in database. Make sure migrations have run.")
 	}
 
-	// 2. Define admin user credentials
-	adminEmail := "admin@pushport.com"
-	adminPassword := "AdminPassword123!" // Feel free to customize this default password
+	// 2. Define admin user credentials from environment with secure fallback
+	adminEmail := os.Getenv("SEED_ADMIN_EMAIL")
+	if adminEmail == "" {
+		adminEmail = "admin@pushport.com"
+	}
+
+	adminPassword := os.Getenv("SEED_ADMIN_PASSWORD")
+	isGenerated := false
+	if adminPassword == "" {
+		randBytes := make([]byte, 16)
+		if _, err := rand.Read(randBytes); err != nil {
+			logger.Log.Fatal().Err(err).Msg("Failed to generate secure random password")
+		}
+		adminPassword = hex.EncodeToString(randBytes) + "A1!"
+		isGenerated = true
+	}
 	adminFirstName := "System"
 	adminLastName := "Admin"
 
@@ -80,9 +95,13 @@ func main() {
 		logger.Log.Fatal().Err(err).Msg("Failed to assign role to admin user")
 	}
 
-	logger.Log.Info().
+	logEvent := logger.Log.Info().
 		Str("email", adminEmail).
-		Str("password", adminPassword).
-		Str("role", "super_admin").
-		Msg("Successfully seeded admin credentials!")
+		Str("role", "super_admin")
+
+	if isGenerated {
+		logEvent.Msg("Successfully seeded admin user with secure random password")
+	} else {
+		logEvent.Msg("Successfully seeded admin user from environment credentials")
+	}
 }

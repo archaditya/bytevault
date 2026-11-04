@@ -649,11 +649,8 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.Status == "BLOCKED_MALWARE" {
-		return "", nil, fmt.Errorf("file access blocked: security threat detected")
-	}
-	if file.Status == "BLOCKED_NSFW" {
-		return "", nil, fmt.Errorf("file access blocked: inappropriate content detected")
+	if file.Status != "ACTIVE" {
+		return "", nil, fmt.Errorf("file is not available for download (status: %s)", file.Status)
 	}
 
 	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 24*time.Hour, file.Filename, inline)
@@ -724,11 +721,8 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.Status == "BLOCKED_MALWARE" {
-		return "", nil, fmt.Errorf("file access blocked: security threat detected")
-	}
-	if file.Status == "BLOCKED_NSFW" {
-		return "", nil, fmt.Errorf("file access blocked: inappropriate content detected")
+	if file.Status != "ACTIVE" {
+		return "", nil, fmt.Errorf("file is not available for public download (status: %s)", file.Status)
 	}
 
 	url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 24*time.Hour, file.Filename, inline)
@@ -880,6 +874,9 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 	}
 	if !s.isAccessiblePublicly(ctx, file) {
 		return nil, fmt.Errorf("unauthorized")
+	}
+	if file.Status != "ACTIVE" {
+		return nil, fmt.Errorf("file is not available (status: %s)", file.Status)
 	}
 
 	// Enrich with presigned thumbnail URL if available
@@ -1305,6 +1302,9 @@ func (s *FileService) GetPublicThumbnailURL(ctx context.Context, fileID string) 
 	}
 	if !s.isAccessiblePublicly(ctx, file) {
 		return "", fmt.Errorf("unauthorized")
+	}
+	if file.Status != "ACTIVE" {
+		return "", fmt.Errorf("file is not available (status: %s)", file.Status)
 	}
 	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
 		return "", fmt.Errorf("thumbnail not available")

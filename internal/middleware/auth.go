@@ -33,9 +33,15 @@ func Auth(authService *service.AuthService, apiKeyService *service.APIKeyService
 				}
 			}
 
-			// 2. Fallback to token query parameter (useful for iframe previews, downloads, and webhooks)
+			// 2. Fallback to token query parameter strictly for preview, download, and invoice routes
 			if token == "" {
-				token = c.QueryParam("token")
+				path := c.Request().URL.Path
+				isAllowedQueryRoute := strings.Contains(path, "/preview") ||
+					strings.Contains(path, "/download") ||
+					strings.HasPrefix(path, "/api/v1/invoices")
+				if isAllowedQueryRoute {
+					token = c.QueryParam("token")
+				}
 			}
 
 			if token == "" {
@@ -121,7 +127,13 @@ func OptionalAuth(authService *service.AuthService, apiKeyService *service.APIKe
 			}
 
 			if token == "" {
-				token = c.QueryParam("token")
+				path := c.Request().URL.Path
+				isAllowedQueryRoute := strings.Contains(path, "/preview") ||
+					strings.Contains(path, "/download") ||
+					strings.HasPrefix(path, "/api/v1/invoices")
+				if isAllowedQueryRoute {
+					token = c.QueryParam("token")
+				}
 			}
 
 			if token == "" {

@@ -41,6 +41,10 @@ func (p *PrefixedStorageProvider) Delete(ctx context.Context, storageKey string)
 	return p.parent.Delete(ctx, p.prefix+storageKey)
 }
 
+func (p *PrefixedStorageProvider) GetObjectSize(ctx context.Context, storageKey string) (int64, error) {
+	return p.parent.GetObjectSize(ctx, p.prefix+storageKey)
+}
+
 func (p *PrefixedStorageProvider) GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error) {
 	return p.parent.GeneratePresignedUploadURL(ctx, p.prefix+storageKey, contentType, expiry)
 }

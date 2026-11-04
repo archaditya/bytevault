@@ -10,17 +10,31 @@ import (
 	"github.com/archaditya/bytevault/internal/repository"
 )
 
+type UserShareFinder interface {
+	FindByEmail(ctx context.Context, email string) (*model.User, error)
+	FindByID(ctx context.Context, id string) (*model.User, error)
+}
+
+type ShareStore interface {
+	Create(ctx context.Context, share *model.Share) error
+	ListByResource(ctx context.Context, resourceType, resourceID, ownerID string) ([]*model.Share, error)
+	ListSharedWithMe(ctx context.Context, granteeEmail string) ([]*model.Share, error)
+	FindByID(ctx context.Context, id string) (*model.Share, error)
+	FindByResourceAndGrantee(ctx context.Context, resourceType, resourceID, granteeEmail string) (*model.Share, error)
+	Revoke(ctx context.Context, id, ownerID string) error
+}
+
 type ShareService struct {
-	shareRepo    *repository.ShareRepository
-	userRepo     *repository.UserRepository
+	shareRepo    ShareStore
+	userRepo     UserShareFinder
 	fileRepo     *repository.FileRepository
 	folderRepo   *repository.FolderRepository
 	activityRepo *repository.ActivityRepository
 }
 
 func NewShareService(
-	shareRepo *repository.ShareRepository,
-	userRepo *repository.UserRepository,
+	shareRepo ShareStore,
+	userRepo UserShareFinder,
 	fileRepo *repository.FileRepository,
 	folderRepo *repository.FolderRepository,
 	activityRepo *repository.ActivityRepository,
@@ -29,7 +43,7 @@ func NewShareService(
 		shareRepo:    shareRepo,
 		userRepo:     userRepo,
 		fileRepo:     fileRepo,
-		folderRepo: folderRepo,
+		folderRepo:   folderRepo,
 		activityRepo: activityRepo,
 	}
 }
@@ -114,6 +128,11 @@ func (s *ShareService) ListResourceShares(ctx context.Context, ownerID, resource
 }
 
 func (s *ShareService) ListSharedWithMe(ctx context.Context, userEmail string) ([]*model.Share, error) {
+	userEmail = strings.ToLower(strings.TrimSpace(userEmail))
+	user, err := s.userRepo.FindByEmail(ctx, userEmail)
+	if err != nil || user == nil || !user.IsVerified {
+		return []*model.Share{}, nil
+	}
 	return s.shareRepo.ListSharedWithMe(ctx, userEmail)
 }
 
@@ -138,16 +157,23 @@ func (s *ShareService) RevokeShare(ctx context.Context, ownerID, shareID string)
 // CheckAccessPermission is the central security gate for granular sharing
 func (s *ShareService) CheckAccessPermission(ctx context.Context, userID, userEmail, resourceType, resourceID, requiredPerm string) (bool, error) {
 	// Owner always has full access
-	if resourceType == "file" {
+	if resourceType == "file" && s.fileRepo != nil {
 		file, err := s.fileRepo.FindByID(ctx, resourceID)
 		if err == nil && file != nil && file.UserID == userID {
 			return true, nil
 		}
-	} else if resourceType == "folder" {
+	} else if resourceType == "folder" && s.folderRepo != nil {
 		folder, err := s.folderRepo.FindByID(ctx, resourceID)
 		if err == nil && folder != nil && folder.UserID == userID {
 			return true, nil
 		}
+	}
+
+	// Unverified users cannot claim shared permissions
+	userEmail = strings.ToLower(strings.TrimSpace(userEmail))
+	granteeUser, err := s.userRepo.FindByEmail(ctx, userEmail)
+	if err != nil || granteeUser == nil || !granteeUser.IsVerified {
+		return false, nil
 	}
 
 	// Check shares table
@@ -170,6 +196,9 @@ func (s *ShareService) ListSharedWithMeByUserID(ctx context.Context, userID stri
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
+	}
+	if !user.IsVerified {
+		return []*model.Share{}, nil
 	}
 	return s.shareRepo.ListSharedWithMe(ctx, user.Email)
 }

@@ -428,12 +428,18 @@ func (w *MediaWorker) processImage(ctx context.Context, file *model.File) ([]byt
 	return resizeImageToJPEG(srcImg, 300)
 }
 
-// 2. Video Handler (FFmpeg subprocess extraction)
+// 2. Video Handler (FFmpeg subprocess extraction with format allowlist, timeout & protocol isolation)
 func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byte, error) {
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	validVideoExts := map[string]bool{".mp4": true, ".mov": true, ".webm": true, ".mkv": true, ".avi": true}
+	if !validVideoExts[ext] {
+		return generateDocumentPoster(ext), nil
+	}
+
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		logger.Log.Warn().Str("file_id", file.ID).Msg("FFmpeg not found. Using fallback poster for video thumbnail.")
-		return generateDocumentPoster(filepath.Ext(file.Filename)), nil
+		return generateDocumentPoster(ext), nil
 	}
 
 	stream, err := w.storage.Download(ctx, file.StorageKey)
@@ -443,7 +449,7 @@ func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byt
 	defer stream.Close()
 
 	tmpDir := os.TempDir()
-	tmpInput := filepath.Join(tmpDir, fmt.Sprintf("vid_in_%s%s", file.ID, filepath.Ext(file.Filename)))
+	tmpInput := filepath.Join(tmpDir, fmt.Sprintf("vid_in_%s%s", file.ID, ext))
 	tmpOutput := filepath.Join(tmpDir, fmt.Sprintf("vid_out_%s.jpg", file.ID))
 
 	outFile, err := os.Create(tmpInput)
@@ -456,28 +462,35 @@ func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byt
 	defer os.Remove(tmpInput)
 	defer os.Remove(tmpOutput)
 
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	// Bounded execution: max 15 seconds to prevent hung processes or CPU exhaustion
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	// Restrict protocols to file,crypto,data to eliminate SSRF and local network access
+	cmd := exec.CommandContext(timeoutCtx, ffmpegPath,
+		"-nostdin",
 		"-y",
+		"-protocol_whitelist", "file,crypto,data",
 		"-ss", "00:00:01",
 		"-i", tmpInput,
-		"-vframes", "1",
+		"-frames:v", "1",
 		"-vf", "scale=300:-1",
 		tmpOutput,
 	)
 
 	if err := cmd.Run(); err != nil {
 		logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("FFmpeg frame extraction failed. Using fallback poster.")
-		return generateDocumentPoster(filepath.Ext(file.Filename)), nil
+		return generateDocumentPoster(ext), nil
 	}
 
 	data, err := os.ReadFile(tmpOutput)
 	if err != nil || len(data) == 0 {
-		return generateDocumentPoster(filepath.Ext(file.Filename)), nil
+		return generateDocumentPoster(ext), nil
 	}
 	return data, nil
 }
 
-// 3. PDF Handler (pdftoppm Poppler subprocess rendering)
+// 3. PDF Handler (pdftoppm Poppler subprocess rendering with timeout & scale bound)
 func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte, error) {
 	pdftoppmPath, err := exec.LookPath("pdftoppm")
 	if err != nil {
@@ -505,8 +518,14 @@ func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte,
 	defer os.Remove(tmpInput)
 	defer os.Remove(tmpOutPrefix + "-1.jpg")
 
-	cmd := exec.CommandContext(ctx, pdftoppmPath,
+	// Bounded execution: max 15 seconds
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	// -scale-to 1024 caps rendering dimensions to guard against memory exhaustion (decompression bombs)
+	cmd := exec.CommandContext(timeoutCtx, pdftoppmPath,
 		"-jpeg",
+		"-scale-to", "1024",
 		"-r", "150",
 		"-f", "1",
 		"-l", "1",

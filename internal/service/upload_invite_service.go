@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
@@ -21,10 +22,10 @@ import (
 const (
 	DefaultInviteMaxBytes   = int64(2) * 1024 * 1024 * 1024 // 2 GB
 	DefaultInviteMaxFiles   = 20
-	DefaultInviteExpiryH    = 168 // 7 days
+	DefaultInviteExpiryH    = 24 // 1 day (reduced from 7 days)
 	MaxInviteMaxBytes       = int64(5) * 1024 * 1024 * 1024 // 5 GB
 	MaxInviteMaxFiles       = 50
-	MaxInviteExpiryH        = 720 // 30 days
+	MaxInviteExpiryH        = 168 // 7 days (reduced from 30 days)
 	MaxActiveInvitesPerUser = 10
 	// IP rate limits: per-session/byte caps, not per-file
 	MaxGuestUploadsPerIP24h = 50
@@ -45,12 +46,14 @@ var BlockedGuestExtensions = map[string]bool{
 var folderNameSanitizer = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
 
 type UploadInviteService struct {
-	inviteRepo   *repository.UploadInviteRepository
-	folderRepo   *repository.FolderRepository
-	fileService  *FileService
-	notifService *NotificationService
-	userRepo     *repository.UserRepository
-	redisQueue   *queue.RedisQueue
+	inviteRepo     *repository.UploadInviteRepository
+	folderRepo     *repository.FolderRepository
+	fileService    *FileService
+	notifService   *NotificationService
+	userRepo       *repository.UserRepository
+	redisQueue     *queue.RedisQueue
+	debounceMu     sync.Mutex
+	debounceTimers map[string]*time.Timer
 }
 
 func NewUploadInviteService(
@@ -62,12 +65,13 @@ func NewUploadInviteService(
 	redisQueue *queue.RedisQueue,
 ) *UploadInviteService {
 	return &UploadInviteService{
-		inviteRepo:   inviteRepo,
-		folderRepo:   folderRepo,
-		fileService:  fileService,
-		notifService: notifService,
-		userRepo:     userRepo,
-		redisQueue:   redisQueue,
+		inviteRepo:     inviteRepo,
+		folderRepo:     folderRepo,
+		fileService:    fileService,
+		notifService:   notifService,
+		userRepo:       userRepo,
+		redisQueue:     redisQueue,
+		debounceTimers: make(map[string]*time.Timer),
 	}
 }
 
@@ -506,10 +510,109 @@ func (s *UploadInviteService) GuestCompleteUpload(ctx context.Context, token, fi
 		return err
 	}
 
-	// 6. Increment batched notification counter (scheduler flushes every ~10 min)
+	// 6. Increment batched notification counter and trigger debounced push notification
 	_ = s.inviteRepo.IncrementPendingNotify(ctx, invite.ID)
+	s.TriggerDebouncedNotification(invite.ID)
 
 	return nil
+}
+
+// TriggerDebouncedNotification resets a 10-second debounce timer for the given invite.
+// When a batch of files is uploaded (e.g. 100 files in a row), the timer extends on each file
+// completion so that only ONE combined push notification is dispatched when the batch completes.
+func (s *UploadInviteService) TriggerDebouncedNotification(inviteID string) {
+	s.debounceMu.Lock()
+	defer s.debounceMu.Unlock()
+
+	if timer, exists := s.debounceTimers[inviteID]; exists {
+		timer.Stop()
+	}
+
+	s.debounceTimers[inviteID] = time.AfterFunc(10*time.Second, func() {
+		s.debounceMu.Lock()
+		delete(s.debounceTimers, inviteID)
+		s.debounceMu.Unlock()
+
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = s.flushSingleInviteNotification(bgCtx, inviteID)
+	})
+}
+
+func (s *UploadInviteService) flushSingleInviteNotification(ctx context.Context, inviteID string) error {
+	inv, count, err := s.inviteRepo.FlushPendingForInvite(ctx, inviteID)
+	if err != nil || inv == nil || count <= 0 {
+		return err
+	}
+	s.sendBatchNotification(ctx, inv.ID, inv.OwnerID, inv.Label, inv.Token, count)
+	return nil
+}
+
+func (s *UploadInviteService) sendBatchNotification(ctx context.Context, inviteID, ownerID, label, token string, count int) {
+	if count <= 0 {
+		return
+	}
+	if label == "" {
+		if len(token) >= 8 {
+			label = fmt.Sprintf("Upload %s", token[:8])
+		} else {
+			label = "Upload Invite"
+		}
+	}
+
+	safeLabel := html.EscapeString(label)
+	title := fmt.Sprintf("%d new file(s) received", count)
+	body := fmt.Sprintf("You received %d new file(s) via invite \"%s\".", count, safeLabel)
+
+	// 1. Mobile/Browser Push alert (FCM)
+	if s.redisQueue != nil {
+		pushJob := &queue.Job{
+			ID:        fmt.Sprintf("invite-notif-push-%s-%d", inviteID, time.Now().UnixNano()),
+			Type:      queue.JobTypePush,
+			UserID:    ownerID,
+			Priority:  queue.PriorityHigh,
+			CreatedAt: time.Now(),
+			Payload: map[string]any{
+				"title": title,
+				"body":  body,
+			},
+		}
+		_ = s.redisQueue.Enqueue(ctx, pushJob)
+	}
+
+	// 2. In-app notification
+	if s.notifService != nil {
+		_ = s.notifService.QueueInAppNotification(ctx, ownerID, "invite.files_received", title, body, map[string]any{
+			"invite_id": inviteID,
+			"label":     label,
+			"count":     count,
+		})
+	}
+
+	// 3. Email notification (reuse existing pipeline)
+	if s.redisQueue != nil && s.userRepo != nil {
+		owner, ownerErr := s.userRepo.FindByID(ctx, ownerID)
+		if ownerErr == nil && owner != nil && owner.Email != "" {
+			ownerName := owner.Email
+			if owner.FirstName != nil && *owner.FirstName != "" {
+				ownerName = *owner.FirstName
+			}
+			emailJob := &queue.Job{
+				ID:        fmt.Sprintf("invite-notif-email-%s-%d", inviteID, time.Now().UnixNano()),
+				Type:      queue.JobTypeEmail,
+				UserID:    ownerID,
+				Priority:  queue.PriorityNormal,
+				CreatedAt: time.Now(),
+				Payload: map[string]any{
+					"to_email":  owner.Email,
+					"to_name":   ownerName,
+					"subject":   fmt.Sprintf("PushPostVault: %s", title),
+					"html_body": fmt.Sprintf("<p>Hi %s,</p><p>%s</p><p>View them in your dashboard under <strong>Received / %s</strong>.</p>", html.EscapeString(ownerName), body, safeLabel),
+				},
+			}
+			_ = s.redisQueue.Enqueue(ctx, emailJob)
+		}
+	}
 }
 
 // FlushPendingNotifications is called by the scheduler to send batched owner notifications.
@@ -520,51 +623,7 @@ func (s *UploadInviteService) FlushPendingNotifications(ctx context.Context) err
 	}
 
 	for i, inv := range invites {
-		count := counts[i]
-		label := inv.Label
-		if label == "" {
-			label = fmt.Sprintf("Upload %s", inv.Token[:8])
-		}
-
-		// Escape label for email safety (guest-controlled input)
-		safeLabel := html.EscapeString(label)
-
-		title := fmt.Sprintf("%d new file(s) received", count)
-		body := fmt.Sprintf("You received %d new file(s) via invite \"%s\".", count, safeLabel)
-
-		// In-app notification
-		if s.notifService != nil {
-			_ = s.notifService.QueueInAppNotification(ctx, inv.OwnerID, "invite.files_received", title, body, map[string]any{
-				"invite_id": inv.ID,
-				"label":     label,
-				"count":     count,
-			})
-		}
-
-		// Email notification (reuse existing pipeline)
-		if s.redisQueue != nil {
-			owner, ownerErr := s.userRepo.FindByID(ctx, inv.OwnerID)
-			if ownerErr == nil && owner != nil && owner.Email != "" {
-				ownerName := owner.Email
-				if owner.FirstName != nil && *owner.FirstName != "" {
-					ownerName = *owner.FirstName
-				}
-				emailJob := &queue.Job{
-					ID:        fmt.Sprintf("invite-notif-email-%s-%d", inv.ID, time.Now().UnixNano()),
-					Type:      queue.JobTypeEmail,
-					UserID:    inv.OwnerID,
-					Priority:  queue.PriorityNormal,
-					CreatedAt: time.Now(),
-					Payload: map[string]any{
-						"to_email":  owner.Email,
-						"to_name":   ownerName,
-						"subject":   fmt.Sprintf("PushPostVault: %s", title),
-						"html_body": fmt.Sprintf("<p>Hi %s,</p><p>%s</p><p>View them in your dashboard under <strong>Received / %s</strong>.</p>", html.EscapeString(ownerName), body, safeLabel),
-					},
-				}
-				_ = s.redisQueue.Enqueue(ctx, emailJob)
-			}
-		}
+		s.sendBatchNotification(ctx, inv.ID, inv.OwnerID, inv.Label, inv.Token, counts[i])
 	}
 
 	return nil

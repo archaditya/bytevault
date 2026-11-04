@@ -87,6 +87,17 @@ func (c *CloudinaryStorage) Delete(ctx context.Context, storageKey string) error
 	return nil
 }
 
+func (c *CloudinaryStorage) GetObjectSize(ctx context.Context, storageKey string) (int64, error) {
+	publicID := cleanPublicID(storageKey)
+	res, err := c.cld.Admin.Asset(ctx, admin.AssetParams{
+		PublicID: publicID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to get cloudinary asset size: %w", err)
+	}
+	return int64(res.Bytes), nil
+}
+
 func (c *CloudinaryStorage) GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error) {
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 	publicID := cleanPublicID(storageKey)

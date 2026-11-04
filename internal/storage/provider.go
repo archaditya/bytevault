@@ -15,6 +15,8 @@ type StorageProvider interface {
 	Download(ctx context.Context, storageKey string) (io.ReadCloser, error)
 	// Delete removes the file physically
 	Delete(ctx context.Context, storageKey string) error
+	// GetObjectSize returns the physical size in bytes of the object in storage
+	GetObjectSize(ctx context.Context, storageKey string) (int64, error)
 	// GeneratePresignedUploadURL creates a temporary URL allowing clients to PUT/POST files directly
 	GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error)
 	// GeneratePresignedDownloadURL creates a secure temporary URL for downloading private assets

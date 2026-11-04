@@ -91,6 +91,20 @@ func (r *R2Storage) Delete(ctx context.Context, storageKey string) error {
 	return nil
 }
 
+func (r *R2Storage) GetObjectSize(ctx context.Context, storageKey string) (int64, error) {
+	head, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(r.bucket),
+		Key:    aws.String(storageKey),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to head object in R2: %w", err)
+	}
+	if head.ContentLength == nil {
+		return 0, fmt.Errorf("head object returned nil content length")
+	}
+	return *head.ContentLength, nil
+}
+
 func (r *R2Storage) GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error) {
 	req, err := r.presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(r.bucket),
@@ -109,13 +123,22 @@ func (r *R2Storage) GeneratePresignedDownloadURL(ctx context.Context, storageKey
 		Key:    aws.String(storageKey),
 	}
 	if filename != "" {
+		ext := strings.ToLower(filepath.Ext(filename))
+		safeInline := map[string]bool{
+			".png":  true,
+			".jpg":  true,
+			".jpeg": true,
+			".webp": true,
+			".pdf":  true,
+			".mp4":  true,
+		}
+
 		disposition := fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", filename, url.PathEscape(filename))
-		if inline {
+		if inline && safeInline[ext] {
 			disposition = fmt.Sprintf("inline; filename=%q; filename*=UTF-8''%s", filename, url.PathEscape(filename))
 		}
 		input.ResponseContentDisposition = aws.String(disposition)
 
-		ext := strings.ToLower(filepath.Ext(filename))
 		switch ext {
 		case ".apk":
 			input.ResponseContentType = aws.String("application/vnd.android.package-archive")
@@ -127,12 +150,17 @@ func (r *R2Storage) GeneratePresignedDownloadURL(ctx context.Context, storageKey
 			input.ResponseContentType = aws.String("image/png")
 		case ".jpg", ".jpeg":
 			input.ResponseContentType = aws.String("image/jpeg")
+		case ".webp":
+			input.ResponseContentType = aws.String("image/webp")
 		case ".mp4":
 			input.ResponseContentType = aws.String("video/mp4")
 		case ".ipa":
 			input.ResponseContentType = aws.String("application/octet-stream")
+		case ".html", ".htm", ".svg", ".xml":
+			// Prevent browser execution/phishing from storage domain
+			input.ResponseContentType = aws.String("application/octet-stream")
 		default:
-			if detectedType := mime.TypeByExtension(ext); detectedType != "" {
+			if detectedType := mime.TypeByExtension(ext); detectedType != "" && !strings.Contains(detectedType, "html") && !strings.Contains(detectedType, "svg") {
 				input.ResponseContentType = aws.String(detectedType)
 			} else {
 				input.ResponseContentType = aws.String("application/octet-stream")

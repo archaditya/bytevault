@@ -67,6 +67,15 @@ func (l *LocalStorage) Delete(ctx context.Context, storageKey string) error {
 	return nil
 }
 
+func (l *LocalStorage) GetObjectSize(ctx context.Context, storageKey string) (int64, error) {
+	fullPath := l.getAbsPath(storageKey)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to stat local storage file: %w", err)
+	}
+	return info.Size(), nil
+}
+
 func (l *LocalStorage) GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error) {
 	// Dev environment shortcut: direct local upload route
 	return fmt.Sprintf("/api/v1/files/upload/direct?key=%s", storageKey), nil
