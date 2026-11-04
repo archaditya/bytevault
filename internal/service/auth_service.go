@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -51,6 +52,7 @@ type AuthService struct {
 	authProviderRepo *repository.AuthProviderRepository
 	notifService     *NotificationService
 	jwtCfg           config.JWTConfig
+	authCfg          config.AuthConfig
 }
 
 func NewAuthService(
@@ -61,6 +63,7 @@ func NewAuthService(
 	authProviderRepo *repository.AuthProviderRepository,
 	notifService *NotificationService,
 	jwtCfg config.JWTConfig,
+	authCfg config.AuthConfig,
 ) *AuthService {
 	return &AuthService{
 		userRepo:         userRepo,
@@ -70,7 +73,12 @@ func NewAuthService(
 		authProviderRepo: authProviderRepo,
 		notifService:     notifService,
 		jwtCfg:           jwtCfg,
+		authCfg:          authCfg,
 	}
+}
+
+func (s *AuthService) SetAuthConfig(cfg config.AuthConfig) {
+	s.authCfg = cfg
 }
 
 func (s *AuthService) Register(ctx context.Context, email, password, firstName, lastName string, ip, ua *string) (*model.User, *TokenPair, error) {
@@ -133,16 +141,22 @@ func (s *AuthService) Register(ctx context.Context, email, password, firstName, 
 	return created, tokens, nil
 }
 
+// dummyBcryptHash is a pre-computed bcrypt hash (cost 10) used to equalize response
+// timing when an account is not found or has a nil password, preventing user enumeration.
+const dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+
 func (s *AuthService) Login(ctx context.Context, email, password string, userAgent, ip *string) (*model.User, *TokenPair, error) {
 	user, err := s.userRepo.FindByEmailForAuth(ctx, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
+			_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash), []byte(password))
 			return nil, nil, ErrInvalidCredentials
 		}
 		return nil, nil, err
 	}
 
 	if user.Password == nil {
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash), []byte(password))
 		return nil, nil, ErrInvalidCredentials
 	}
 
@@ -280,13 +294,24 @@ func (s *AuthService) ValidateAccessToken(tokenString string) (*TokenClaims, err
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(s.jwtCfg.Secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 	if err != nil {
 		return nil, ErrInvalidToken
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	// Security: Reject tokens issued with a specific purpose (e.g. MFA verification tokens)
+	if purpose, hasPurpose := claims["purpose"]; hasPurpose && purpose != nil {
+		return nil, ErrInvalidToken
+	}
+
+	// Security: Require explicit access token type
+	tokenType, _ := claims["typ"].(string)
+	if tokenType != "access" {
 		return nil, ErrInvalidToken
 	}
 
@@ -324,8 +349,14 @@ func (s *AuthService) GoogleLogin(
 	userAgent *string,
 	ip *string,
 ) (*model.User, *TokenPair, error) {
-	// 1. Verify token with Google's tokeninfo endpoint
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + idToken)
+	// 1. Verify token with Google's tokeninfo endpoint using dedicated HTTP client with 5s timeout
+	client := &http.Client{Timeout: 5 * time.Second}
+	tokenURL := "https://oauth2.googleapis.com/tokeninfo?id_token=" + url.QueryEscape(idToken)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create Google verify request: %w", err)
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to verify Google token: %w", err)
 	}
@@ -335,10 +366,32 @@ func (s *AuthService) GoogleLogin(
 		return nil, nil, fmt.Errorf("invalid Google token")
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read Google token response: %w", err)
+	}
 	var claims map[string]any
 	if err := json.Unmarshal(body, &claims); err != nil {
 		return nil, nil, fmt.Errorf("failed to parse Google token: %w", err)
+	}
+
+	// Audience verification: ensure token was minted for our application
+	if s.authCfg.GoogleClientID != "" {
+		aud, _ := claims["aud"].(string)
+		if aud != s.authCfg.GoogleClientID {
+			return nil, nil, fmt.Errorf("Google token audience mismatch")
+		}
+	}
+
+	// Email verification: ensure email is verified by Google
+	emailVerified := false
+	if ev, ok := claims["email_verified"].(bool); ok {
+		emailVerified = ev
+	} else if evStr, ok := claims["email_verified"].(string); ok {
+		emailVerified = strings.ToLower(evStr) == "true"
+	}
+	if !emailVerified {
+		return nil, nil, fmt.Errorf("Google account email is not verified")
 	}
 
 	rawEmail, _ := claims["email"].(string)
@@ -470,6 +523,11 @@ func (s *AuthService) GoogleLogin(
 			if !user.IsVerified {
 				user.IsVerified = true
 				updated = true
+				// Pre-hijack mitigation: genuine owner proved ownership via Google OAuth.
+				// Invalidate all existing sessions and clear unverified password.
+				user.Password = nil
+				_ = s.sessionRepo.DeleteAllByUserID(ctx, user.ID)
+				_ = s.userRepo.ClearPassword(ctx, user.ID)
 			}
 
 			if updated {
@@ -680,11 +738,12 @@ func (s *AuthService) createSession(ctx context.Context, userID, role string, pe
 
 	now := time.Now()
 
-	// JWT now includes role + permissions
+	// JWT now includes role + permissions + explicit token type
 	accessClaims := jwt.MapClaims{
 		"sub":         userID,
 		"role":        role,
 		"permissions": permissions,
+		"typ":         "access",
 		"iat":         now.Unix(),
 		"exp":         now.Add(accessDuration).Unix(),
 	}

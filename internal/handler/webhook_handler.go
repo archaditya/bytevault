@@ -100,7 +100,11 @@ func (h *WebhookHandler) HandleRazorpayWebhook(c echo.Context) error {
 	}
 
 	// Verify webhook signature
-	if h.razorpayClient != nil && !h.razorpayClient.VerifyWebhookSignature(bodyBytes, signature) {
+	if h.razorpayClient == nil {
+		log.Error().Msg("Razorpay client unconfigured; cannot process webhook")
+		return c.String(http.StatusServiceUnavailable, "webhook handler unconfigured")
+	}
+	if !h.razorpayClient.VerifyWebhookSignature(bodyBytes, signature) {
 		log.Warn().Str("signature", signature).Msg("Invalid Razorpay webhook signature")
 		return c.String(http.StatusBadRequest, "invalid signature")
 	}

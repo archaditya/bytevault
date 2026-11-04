@@ -25,3 +25,45 @@ type EphemeralShare struct {
 	ProgressPct   int        `json:"progress_pct"`
 	UploadedBytes int64      `json:"uploaded_bytes"`
 }
+
+// EphemeralMetadataDTO is the public metadata representation for guest transfers.
+// It explicitly omits internal database IDs, storage keys, and sender IP / User-Agent.
+type EphemeralMetadataDTO struct {
+	Token         string    `json:"token"`
+	Filename      string    `json:"filename"`
+	FileSize      int64     `json:"file_size"`
+	ContentType   string    `json:"content_type"`
+	Status        string    `json:"status"`
+	MaxDownloads  int       `json:"max_downloads"`
+	DownloadCount int       `json:"download_count"`
+	HasPassword   bool      `json:"has_password"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	PreviewURL    *string   `json:"preview_url,omitempty"`
+	IsLive        bool      `json:"is_live"`
+	ProgressPct   int       `json:"progress_pct"`
+	UploadedBytes int64     `json:"uploaded_bytes"`
+}
+
+// ToMetadataDTO converts the full database model to a safe public DTO.
+func (s *EphemeralShare) ToMetadataDTO() *EphemeralMetadataDTO {
+	if s == nil {
+		return nil
+	}
+	return &EphemeralMetadataDTO{
+		Token:         s.Token,
+		Filename:      s.Filename,
+		FileSize:      s.FileSize,
+		ContentType:   s.ContentType,
+		Status:        s.Status,
+		MaxDownloads:  s.MaxDownloads,
+		DownloadCount: s.DownloadCount,
+		HasPassword:   s.HasPassword,
+		ExpiresAt:     s.ExpiresAt,
+		CreatedAt:     s.CreatedAt,
+		PreviewURL:    s.PreviewURL,
+		IsLive:        s.IsLive,
+		ProgressPct:   s.ProgressPct,
+		UploadedBytes: s.UploadedBytes,
+	}
+}

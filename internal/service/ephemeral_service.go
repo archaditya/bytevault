@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,8 +22,19 @@ type LiveProgress struct {
 	UpdatedAt     time.Time
 }
 
+type EphemeralShareStore interface {
+	CountUploadsByIPInWindow(ctx context.Context, ip string) (int, error)
+	Create(ctx context.Context, share *model.EphemeralShare) error
+	FindByToken(ctx context.Context, token string) (*model.EphemeralShare, error)
+	UpdateStatus(ctx context.Context, token string, status string) error
+	DeleteByToken(ctx context.Context, token string) error
+	IncrementDownloadAndCheckBurn(ctx context.Context, id string) (int, bool, error)
+	MarkBurned(ctx context.Context, id string) error
+	ListAllForAdmin(ctx context.Context, limit, offset int) ([]*model.EphemeralShare, int, error)
+}
+
 type EphemeralService struct {
-	repo          *repository.EphemeralShareRepository
+	repo          EphemeralShareStore
 	settingRepo   *repository.EphemeralSettingRepository
 	storage       storage.StorageProvider
 	bandwidthRepo *repository.BandwidthRepository
@@ -34,7 +46,7 @@ func (s *EphemeralService) SetBandwidthRepo(repo *repository.BandwidthRepository
 	s.bandwidthRepo = repo
 }
 
-func NewEphemeralService(repo *repository.EphemeralShareRepository, settingRepo *repository.EphemeralSettingRepository, storage storage.StorageProvider) *EphemeralService {
+func NewEphemeralService(repo EphemeralShareStore, settingRepo *repository.EphemeralSettingRepository, storage storage.StorageProvider) *EphemeralService {
 	return &EphemeralService{
 		repo:        repo,
 		settingRepo: settingRepo,
@@ -302,6 +314,20 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
 
+	// Security: Verify actual assembled object size in storage against claimed size and 2 GB limit
+	actualSize, sizeErr := s.storage.GetObjectSize(ctx, share.StorageKey)
+	if sizeErr == nil {
+		const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
+		if actualSize > share.FileSize || actualSize > maxAllowedLimit {
+			_ = s.storage.Delete(ctx, share.StorageKey)
+			_ = s.repo.UpdateStatus(ctx, token, "BURNED")
+			s.progressMu.Lock()
+			delete(s.progressMap, token)
+			s.progressMu.Unlock()
+			return fmt.Errorf("uploaded file size (%d bytes) exceeds declared size (%d bytes) or maximum limit", actualSize, share.FileSize)
+		}
+	}
+
 	s.progressMu.Lock()
 	delete(s.progressMap, token)
 	s.progressMu.Unlock()
@@ -349,10 +375,16 @@ func (s *EphemeralService) GetMetadata(ctx context.Context, token string) (*mode
 		}
 		s.progressMu.RUnlock()
 	}
-	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") {
-		url, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 1*time.Hour, "", true)
-		if err == nil {
-			share.PreviewURL = &url
+	// Burn-safe preview URLs: only generate preview for multi-download shares, safe image types, and <= 10MB
+	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") && share.MaxDownloads > 1 {
+		safeImg := strings.HasPrefix(share.ContentType, "image/jpeg") ||
+			strings.HasPrefix(share.ContentType, "image/png") ||
+			strings.HasPrefix(share.ContentType, "image/webp")
+		if safeImg && share.FileSize <= 10*1024*1024 {
+			url, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 15*time.Minute, "", true)
+			if err == nil {
+				share.PreviewURL = &url
+			}
 		}
 	}
 	return share, nil
@@ -378,13 +410,24 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 		}
 	}
 
+	// Security: Verify actual object size in storage before generating download link
+	actualSize, sizeErr := s.storage.GetObjectSize(ctx, share.StorageKey)
+	if sizeErr == nil {
+		const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
+		if actualSize > share.FileSize || actualSize > maxAllowedLimit {
+			_ = s.storage.Delete(ctx, share.StorageKey)
+			_ = s.repo.UpdateStatus(ctx, token, "BURNED")
+			return "", fmt.Errorf("file size verification failed: object was removed")
+		}
+	}
+
 	_, shouldBurn, err := s.repo.IncrementDownloadAndCheckBurn(ctx, share.ID)
 	if err != nil {
 		return "", fmt.Errorf("failed to process download: %w", err)
 	}
 
-	// Generate 2-hour active presigned URL for browser stream and resumable HTTP Range
-	downloadURL, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 2*time.Hour, share.Filename, false)
+	// Generate 30-minute active presigned URL for browser stream and resumable HTTP Range
+	downloadURL, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 30*time.Minute, share.Filename, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate download link: %w", err)
 	}
@@ -392,9 +435,9 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 	if shouldBurn {
 		// Mark BURNED in DB immediately so no SECOND request can generate a presigned URL
 		_ = s.repo.MarkBurned(ctx, share.ID)
-		// Delay physical R2 storage deletion by 2 hours so active/resumed download streams cleanly
+		// Delay physical R2 storage deletion by 30 minutes so active/resumed download streams cleanly
 		go func(storageKey string) {
-			time.Sleep(2 * time.Hour)
+			time.Sleep(30 * time.Minute)
 			bgCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			_ = s.storage.Delete(bgCtx, storageKey)

@@ -2,13 +2,15 @@ package server
 
 import (
 	"github.com/archaditya/bytevault/internal/handler"
+	appMiddleware "github.com/archaditya/bytevault/internal/middleware"
 )
 
 // registerHealthRoutes adds system/infra routes.
-// These are public endpoints for orchestrators and uptime monitors.
-func (s *Server) registerHealthRoutes(v1 *Group) {
+// /health is public for orchestrators and uptime monitors.
+// /health/deep exposes DB pool and internal telemetry, requiring admin:telemetry permission.
+func (s *Server) registerHealthRoutes(v1 *Group, protected *Group) {
 	healthHandler := handler.NewHealthHandler(s.db)
 
 	v1.GET("/health", healthHandler.Health)
-	v1.GET("/health/deep", healthHandler.DeepHealth)
+	protected.GET("/health/deep", healthHandler.DeepHealth, appMiddleware.RequirePermission("admin:telemetry"))
 }

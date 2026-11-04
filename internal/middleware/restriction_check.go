@@ -22,8 +22,9 @@ func RestrictionCheck(userRepo *repository.UserRepository) echo.MiddlewareFunc {
 
 			restricted, until, reason, err := userRepo.IsUserRestricted(c.Request().Context(), userID)
 			if err != nil {
-				// Don't block the request on DB errors — fail open
-				return next(c)
+				return c.JSON(http.StatusInternalServerError, map[string]any{
+					"error": "Failed to verify account restriction status",
+				})
 			}
 
 			if !restricted {

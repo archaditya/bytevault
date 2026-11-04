@@ -14,12 +14,18 @@ type Config struct {
 	Server       ServerConfig       `koanf:"server"`
 	Database     DatabaseConfig     `koanf:"db"`
 	App          AppConfig          `koanf:"app"`
+	Auth         AuthConfig         `koanf:"auth"`
 	JWT          JWTConfig          `koanf:"jwt"`
 	Storage      StorageConfig      `koanf:"storage"`
 	Redis        RedisConfig        `koanf:"redis"`
 	Notification NotificationConfig `koanf:"notification"`
 	AI           AIConfig           `koanf:"ai"`
 	Razorpay     RazorpayConfig     `koanf:"razorpay"`
+}
+
+// AuthConfig holds credentials and settings for third-party authentication providers.
+type AuthConfig struct {
+	GoogleClientID string `koanf:"googleclientid"`
 }
 
 // RazorpayConfig holds API keys and webhook secret for Razorpay billing.
@@ -132,6 +138,12 @@ func Load() (*Config, error) {
 		}
 		if strings.HasPrefix(s, "ai_") {
 			return "ai." + strings.Replace(s[len("ai_"):], "_", "", -1)
+		}
+		if strings.HasPrefix(s, "auth_") {
+			return "auth." + strings.Replace(s[len("auth_"):], "_", "", -1)
+		}
+		if s == "google_client_id" {
+			return "auth.googleclientid"
 		}
 		if strings.HasPrefix(s, "razorpay_") {
 			return "razorpay." + strings.Replace(s[len("razorpay_"):], "_", "", -1)

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,6 +27,14 @@ type Server struct {
 func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 	e := echo.New()
 	e.HideBanner = true
+
+	// Secure IP Extraction: prioritize CF-Connecting-IP (Cloudflare) or direct connection to prevent XFF spoofing
+	e.IPExtractor = func(req *http.Request) string {
+		if cfIP := req.Header.Get("CF-Connecting-IP"); cfIP != "" {
+			return strings.TrimSpace(cfIP)
+		}
+		return echo.ExtractIPDirect()(req)
+	}
 
 	// Middleware = functions that run BEFORE handler
 	// Request → RateLimit → Recover → CORS → RequestID → Handler → Response
@@ -61,10 +70,15 @@ func New(cfg *config.Config, db *pgxpool.Pool) *Server {
 				event = logger.Log.Info()
 			}
 
+			loggedURI := v.URI
+			if qIdx := strings.Index(loggedURI, "?"); qIdx != -1 {
+				loggedURI = loggedURI[:qIdx] + "?[REDACTED]"
+			}
+
 			event.
 				Int("status", v.Status).
 				Str("method", v.Method).
-				Str("uri", v.URI).
+				Str("uri", loggedURI).
 				Str("ip", v.RemoteIP).
 				Str("latency", v.Latency.String()).
 				Msg("request")

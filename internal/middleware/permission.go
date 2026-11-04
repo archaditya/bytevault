@@ -9,6 +9,12 @@ import (
 func RequirePermission(permission string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			// Super admin possesses unrestricted system access
+			role, _ := c.Get("role").(string)
+			if role == "super_admin" {
+				return next(c)
+			}
+
 			perms, ok := c.Get("permissions").(map[string]bool)
 			if !ok {
 				return c.JSON(http.StatusForbidden, map[string]any{

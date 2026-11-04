@@ -92,7 +92,7 @@ func (s *Server) registerRoutes() {
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
 	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, deviceRepo, userRepo)
 	authProviderRepo := repository.NewAuthProviderRepository(s.db)
-	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT)
+	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT, s.config.Auth)
 	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue, activityRepo)
 	fileService.SetFolderRepo(folderRepo)
 	folderService := service.NewFolderService(folderRepo, fileRepo, activityRepo)
@@ -162,29 +162,29 @@ func (s *Server) registerRoutes() {
 	v1 := s.echo.Group("/api/v1")
 	v1.Use(appMiddleware.MaintenanceModeMiddleware(settingRepo))
 
-	// Public routes
-	s.registerHealthRoutes(v1)
-
 	// Protected routes (JWT or API Key required)
 	authMiddleware := appMiddleware.Auth(authService, apiKeyService, apiKeyLimiter)
 	optionalAuthMiddleware := appMiddleware.OptionalAuth(authService, apiKeyService, apiKeyLimiter)
 	protected := v1.Group("", authMiddleware)
+
+	// Public and deep health routes
+	s.registerHealthRoutes(v1, protected)
 
 	// Auth routes (needs both v1 for public + protected for MFA)
 	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo, consentService)
 
 	// Delegate Route Groupings
 	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store, subRepo, consentService)
-	s.registerFolderRoutes(v1, protected, folderHandler)
+	s.registerFolderRoutes(v1, protected, folderHandler, userRepo)
 	s.registerNotificationRoutes(protected, notifHandler)
 	s.registerAdminRoutes(protected, adminHandler, moderationHandler, pkgHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
 	s.registerFileRoutes(v1, fileHandler, authMiddleware, optionalAuthMiddleware, userRepo)
-	s.registerShareRoutes(protected, shareHandler)
+	s.registerShareRoutes(protected, shareHandler, userRepo)
 	s.registerEphemeralRoutes(v1, protected, ephemeralHandler)
 	s.registerModerationUserRoutes(protected, moderationHandler)
 	s.registerSubscriptionRoutes(v1, protected, subHandler, pkgHandler, webhookHandler)
-	s.registerUploadInviteRoutes(v1, protected, uploadInviteHandler)
+	s.registerUploadInviteRoutes(v1, protected, uploadInviteHandler, userRepo)
 	s.registerAPIKeyRoutes(protected, apiKeyHandler)
 
 	// 7. Start Background Workers and Scheduler

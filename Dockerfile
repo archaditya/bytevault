@@ -20,10 +20,16 @@ FROM alpine:3.22
 
 WORKDIR /app
 
-RUN apk update && apk upgrade --no-cache && apk add --no-cache ca-certificates curl ffmpeg poppler-utils
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates curl ffmpeg poppler-utils && \
+    addgroup -S appgroup && adduser -S appuser -G appgroup
 
 COPY --from=builder /app/bytevault .
 COPY public ./public
+
+RUN chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 8080
 
