@@ -257,3 +257,18 @@ func (h *EphemeralHandler) ListAdminLogs(c echo.Context) error {
 	}
 	return SendSuccess(c, http.StatusOK, map[string]any{"shares": shares, "total": total}, nil)
 }
+
+// DELETE /api/v1/admin/ephemeral/:token
+func (h *EphemeralHandler) AdminBurnShare(c echo.Context) error {
+	token := c.Param("token")
+	if token == "" {
+		return SendError(c, http.StatusBadRequest, "token is required")
+	}
+
+	if err := h.service.AdminBurnShare(c.Request().Context(), token); err != nil {
+		return SendError(c, http.StatusNotFound, err.Error())
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]string{"message": "Share successfully burned and removed"}, nil)
+}
+

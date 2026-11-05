@@ -314,18 +314,20 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 		return fmt.Errorf("failed to complete multipart upload: %w", err)
 	}
 
-	// Security: Verify actual assembled object size in storage against claimed size and 2 GB limit
+	// Security: Verify actual assembled object size in storage against claimed size and 2 GB limit (fail-closed, non-destructive on storage error)
 	actualSize, sizeErr := s.storage.GetObjectSize(ctx, share.StorageKey)
-	if sizeErr == nil {
-		const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
-		if actualSize > share.FileSize || actualSize > maxAllowedLimit {
-			_ = s.storage.Delete(ctx, share.StorageKey)
-			_ = s.repo.UpdateStatus(ctx, token, "BURNED")
-			s.progressMu.Lock()
-			delete(s.progressMap, token)
-			s.progressMu.Unlock()
-			return fmt.Errorf("uploaded file size (%d bytes) exceeds declared size (%d bytes) or maximum limit", actualSize, share.FileSize)
-		}
+	if sizeErr != nil {
+		// Transient storage error — do NOT delete object or burn share; let sender retry
+		return fmt.Errorf("failed to verify uploaded file size: %w", sizeErr)
+	}
+	const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
+	if actualSize > share.FileSize || actualSize > maxAllowedLimit {
+		_ = s.storage.Delete(ctx, share.StorageKey)
+		_ = s.repo.UpdateStatus(ctx, token, "BURNED")
+		s.progressMu.Lock()
+		delete(s.progressMap, token)
+		s.progressMu.Unlock()
+		return fmt.Errorf("uploaded file size (%d bytes) exceeds declared size (%d bytes) or maximum limit", actualSize, share.FileSize)
 	}
 
 	s.progressMu.Lock()
@@ -410,15 +412,17 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 		}
 	}
 
-	// Security: Verify actual object size in storage before generating download link
+	// Security: Verify actual object size in storage before generating download link (fail-closed, non-destructive on storage error)
 	actualSize, sizeErr := s.storage.GetObjectSize(ctx, share.StorageKey)
-	if sizeErr == nil {
-		const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
-		if actualSize > share.FileSize || actualSize > maxAllowedLimit {
-			_ = s.storage.Delete(ctx, share.StorageKey)
-			_ = s.repo.UpdateStatus(ctx, token, "BURNED")
-			return "", fmt.Errorf("file size verification failed: object was removed")
-		}
+	if sizeErr != nil {
+		// Transient storage error — do NOT delete object or burn share; let recipient retry
+		return "", fmt.Errorf("file size verification failed: %w", sizeErr)
+	}
+	const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
+	if actualSize > share.FileSize || actualSize > maxAllowedLimit {
+		_ = s.storage.Delete(ctx, share.StorageKey)
+		_ = s.repo.UpdateStatus(ctx, token, "BURNED")
+		return "", fmt.Errorf("file size verification failed: object was removed")
 	}
 
 	_, shouldBurn, err := s.repo.IncrementDownloadAndCheckBurn(ctx, share.ID)
@@ -458,3 +462,25 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 func (s *EphemeralService) ListAllForAdmin(ctx context.Context, limit, offset int) ([]*model.EphemeralShare, int, error) {
 	return s.repo.ListAllForAdmin(ctx, limit, offset)
 }
+
+// AdminBurnShare allows an administrator to immediately burn and purge an ephemeral share.
+func (s *EphemeralService) AdminBurnShare(ctx context.Context, token string) error {
+	share, err := s.repo.FindByToken(ctx, token)
+	if err != nil {
+		return err
+	}
+	if share == nil {
+		return fmt.Errorf("ephemeral share not found")
+	}
+
+	if share.StorageKey != "" {
+		_ = s.storage.Delete(ctx, share.StorageKey)
+	}
+
+	s.progressMu.Lock()
+	delete(s.progressMap, token)
+	s.progressMu.Unlock()
+
+	return s.repo.UpdateStatus(ctx, token, "BURNED")
+}
+

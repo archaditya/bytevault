@@ -261,7 +261,7 @@ func (s *SubscriptionService) Verify(ctx context.Context, userID, rzpSubscriptio
 		_ = s.notifService.NotifySubscription(
 			ctx, userID,
 			"Subscription Activated!",
-			fmt.Sprintf("Your ByteVault %s subscription is now active.", pkg.DisplayName),
+			fmt.Sprintf("Your PushPostVault %s subscription is now active.", pkg.DisplayName),
 			"subscription.activated",
 		)
 	}
@@ -352,7 +352,7 @@ func (s *SubscriptionService) Upgrade(ctx context.Context, userID, targetPackage
 		_ = s.notifService.NotifySubscription(
 			ctx, userID,
 			"Plan Upgraded!",
-			fmt.Sprintf("You have upgraded to ByteVault %s. Your storage limits have been expanded immediately.", targetPkg.DisplayName),
+			fmt.Sprintf("You have upgraded to PushPostVault %s. Your storage limits have been expanded immediately.", targetPkg.DisplayName),
 			"subscription.upgraded",
 		)
 	}
@@ -609,7 +609,7 @@ func (s *SubscriptionService) AdminCancel(ctx context.Context, subscriptionID st
 		_ = s.notifService.NotifySubscription(
 			ctx, sub.UserID,
 			"Subscription Cancelled by Admin",
-			"Your ByteVault subscription has been cancelled by an administrator. Your storage has been reset to the Free tier.",
+			"Your PushPostVault subscription has been cancelled by an administrator. Your storage has been reset to the Free tier.",
 			"subscription.admin_cancelled",
 		)
 	}
@@ -761,7 +761,7 @@ func (s *SubscriptionService) ProcessScheduledDowngrades(ctx context.Context) er
 				_ = s.notifService.NotifySubscription(
 					ctx, sub.UserID,
 					"Plan Changed",
-					fmt.Sprintf("Your ByteVault subscription has been changed to %s as scheduled.", targetPkg.DisplayName),
+					fmt.Sprintf("Your PushPostVault subscription has been changed to %s as scheduled.", targetPkg.DisplayName),
 					"subscription.downgrade_applied",
 				)
 			}
@@ -831,7 +831,7 @@ func (s *SubscriptionService) ProcessScheduledDowngrades(ctx context.Context) er
 					_ = s.notifService.NotifySubscription(
 						ctx, sub.UserID,
 						fmt.Sprintf("Subscription Renewal in %s", dayText),
-						fmt.Sprintf("Your ByteVault %s subscription is scheduled to renew in %s on %s. Please ensure your payment method has sufficient balance.", pkgName, dayText, renewalDate),
+						fmt.Sprintf("Your PushPostVault %s subscription is scheduled to renew in %s on %s. Please ensure your payment method has sufficient balance.", pkgName, dayText, renewalDate),
 						"subscription.renewal_reminder",
 					)
 

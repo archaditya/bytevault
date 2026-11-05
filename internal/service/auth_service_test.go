@@ -165,4 +165,24 @@ func TestGoogleLogin_AudienceAndEmailVerifiedRejection(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid Google token") {
 		t.Fatalf("expected error containing 'invalid Google token', got: %v", err)
 	}
+
+	// 4. Missing GoogleClientID configuration: fail-closed rejection
+	unconfiguredSvc := service.NewAuthService(
+		nil, nil, nil, nil, nil, nil,
+		config.JWTConfig{Secret: "test-secret-32-chars-long-here-123", AccessExpiry: "15m", RefreshExpiry: "168h"},
+		config.AuthConfig{}, // Empty GoogleClientID
+	)
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		validResp := `{"aud": "some-id", "email": "valid@example.com", "sub": "g-123", "email_verified": true}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(validResp)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	_, _, err = unconfiguredSvc.GoogleLogin(context.Background(), "any-token", nil, nil, nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "missing GoogleClientID") {
+		t.Fatalf("expected error containing 'missing GoogleClientID', got: %v", err)
+	}
 }

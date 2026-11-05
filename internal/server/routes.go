@@ -91,6 +91,7 @@ func (s *Server) registerRoutes() {
 	// 4. Initialize Services
 	emailClient := email.NewBrevoClient(s.config.Notification.Brevo)
 	notifService := service.NewNotificationService(redisQueue, notifRepo, verifyRepo, deviceRepo, userRepo)
+	notifService.SetSessionRepo(sessionRepo)
 	authProviderRepo := repository.NewAuthProviderRepository(s.db)
 	authService := service.NewAuthService(userRepo, sessionRepo, roleRepo, activityRepo, authProviderRepo, notifService, s.config.JWT, s.config.Auth)
 	fileService := service.NewFileService(fileRepo, userRepo, store, s.config.Storage.Provider, s.config.Storage.R2Bucket, redisQueue, activityRepo)
@@ -134,6 +135,7 @@ func (s *Server) registerRoutes() {
 	folderHandler := handler.NewFolderHandler(folderService)
 	notifHandler := handler.NewNotificationHandler(authService, notifService)
 	contactHandler := handler.NewContactHandler(contactService)
+	contactHandler.SetNotificationService(notifService)
 	shareHandler := handler.NewShareHandler(shareService)
 	ephemeralHandler := handler.NewEphemeralHandler(ephemeralService)
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
@@ -171,7 +173,7 @@ func (s *Server) registerRoutes() {
 	s.registerHealthRoutes(v1, protected)
 
 	// Auth routes (needs both v1 for public + protected for MFA)
-	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo, consentService)
+	s.registerAuthRoutes(v1, protected, authService, notifHandler, userRepo, consentService, notifService)
 
 	// Delegate Route Groupings
 	s.registerUserRoutes(v1, protected, userRepo, deviceRepo, sessionRepo, fileRepo, store, subRepo, consentService)

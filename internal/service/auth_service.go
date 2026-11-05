@@ -29,6 +29,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 	ErrMFARequired        = errors.New("mfa_required")
+	ErrTooManyMFAAttempts = errors.New("too many failed MFA attempts: please try again later")
 )
 
 // TokenClaims holds the decoded JWT claims
@@ -375,12 +376,13 @@ func (s *AuthService) GoogleLogin(
 		return nil, nil, fmt.Errorf("failed to parse Google token: %w", err)
 	}
 
-	// Audience verification: ensure token was minted for our application
-	if s.authCfg.GoogleClientID != "" {
-		aud, _ := claims["aud"].(string)
-		if aud != s.authCfg.GoogleClientID {
-			return nil, nil, fmt.Errorf("Google token audience mismatch")
-		}
+	// Audience verification: ensure token was minted for our application (fail-closed)
+	if s.authCfg.GoogleClientID == "" {
+		return nil, nil, fmt.Errorf("Google OAuth not configured: missing GoogleClientID")
+	}
+	aud, _ := claims["aud"].(string)
+	if aud != s.authCfg.GoogleClientID {
+		return nil, nil, fmt.Errorf("Google token audience mismatch")
 	}
 
 	// Email verification: ensure email is verified by Google
@@ -594,6 +596,14 @@ func (s *AuthService) SetupMFA(ctx context.Context, userID string) (string, stri
 
 // EnableMFA verifies the TOTP code and activates MFA for the user
 func (s *AuthService) EnableMFA(ctx context.Context, userID, code string) error {
+	// Rate limit check before verifying TOTP code
+	if s.notifService != nil {
+		attempts, err := s.notifService.CheckMFARateLimit(ctx, userID)
+		if err == nil && attempts > 5 {
+			return ErrTooManyMFAAttempts
+		}
+	}
+
 	_, mfaSecret, err := s.userRepo.GetMFAFields(ctx, userID)
 	if err != nil || mfaSecret == nil || *mfaSecret == "" {
 		return fmt.Errorf("MFA not set up. Call /auth/mfa/setup first")
@@ -603,11 +613,24 @@ func (s *AuthService) EnableMFA(ctx context.Context, userID, code string) error 
 		return fmt.Errorf("invalid TOTP code")
 	}
 
+	// Clear counter on success
+	if s.notifService != nil {
+		_ = s.notifService.ClearMFARateLimit(ctx, userID)
+	}
+
 	return s.userRepo.UpdateMFA(ctx, userID, true, mfaSecret)
 }
 
 // DisableMFA verifies the TOTP code and deactivates MFA for the user
 func (s *AuthService) DisableMFA(ctx context.Context, userID, code string) error {
+	// Rate limit check before verifying TOTP code
+	if s.notifService != nil {
+		attempts, err := s.notifService.CheckMFARateLimit(ctx, userID)
+		if err == nil && attempts > 5 {
+			return ErrTooManyMFAAttempts
+		}
+	}
+
 	mfaEnabled, mfaSecret, err := s.userRepo.GetMFAFields(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to read MFA status: %w", err)
@@ -620,6 +643,11 @@ func (s *AuthService) DisableMFA(ctx context.Context, userID, code string) error
 		return fmt.Errorf("invalid TOTP code")
 	}
 
+	// Clear counter on success
+	if s.notifService != nil {
+		_ = s.notifService.ClearMFARateLimit(ctx, userID)
+	}
+
 	return s.userRepo.UpdateMFA(ctx, userID, false, nil)
 }
 
@@ -630,6 +658,18 @@ func (s *AuthService) VerifyMFALogin(ctx context.Context, mfaToken, code string,
 		return nil, nil, ErrInvalidToken
 	}
 
+	// Security: Rate limit failed TOTP attempts per user ID using Redis (max 5 attempts per 15 mins)
+	if s.notifService != nil {
+		attempts, err := s.notifService.CheckMFARateLimit(ctx, userID)
+		if err == nil && attempts > 5 {
+			return nil, nil, ErrTooManyMFAAttempts
+		}
+	}
+
+	if s.userRepo == nil {
+		return nil, nil, fmt.Errorf("user repository not configured")
+	}
+
 	_, mfaSecret, mfaErr := s.userRepo.GetMFAFields(ctx, userID)
 	if mfaErr != nil || mfaSecret == nil {
 		return nil, nil, fmt.Errorf("MFA not configured")
@@ -637,6 +677,11 @@ func (s *AuthService) VerifyMFALogin(ctx context.Context, mfaToken, code string,
 
 	if !security.VerifyTOTPCode(*mfaSecret, code) {
 		return nil, nil, fmt.Errorf("invalid TOTP code")
+	}
+
+	// Successful verification: clear attempt counter
+	if s.notifService != nil {
+		_ = s.notifService.ClearMFARateLimit(ctx, userID)
 	}
 
 	user, err := s.userRepo.FindByID(ctx, userID)

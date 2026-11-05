@@ -8,10 +8,13 @@ import (
 )
 
 // registerAuthRoutes adds all /auth/* endpoints.
-func (s *Server) registerAuthRoutes(v1 *Group, protected *Group, authService *service.AuthService, notifHandler *handler.NotificationHandler, userRepo *repository.UserRepository, consentService *service.ConsentService) {
+func (s *Server) registerAuthRoutes(v1 *Group, protected *Group, authService *service.AuthService, notifHandler *handler.NotificationHandler, userRepo *repository.UserRepository, consentService *service.ConsentService, notifService *service.NotificationService) {
 	authHandler := handler.NewAuthHandler(authService, userRepo)
 	if consentService != nil {
 		authHandler.SetConsentService(consentService)
+	}
+	if notifService != nil {
+		authHandler.SetNotificationService(notifService)
 	}
 
 	auth := v1.Group("/auth")

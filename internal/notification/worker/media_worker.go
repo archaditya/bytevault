@@ -462,21 +462,51 @@ func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byt
 	defer os.Remove(tmpInput)
 	defer os.Remove(tmpOutput)
 
+	// Security: Verify file is not a disguised HLS playlist (#EXTM3U) or text script attempting LFI/SSRF
+	headerCheck, err := os.Open(tmpInput)
+	if err == nil {
+		buf := make([]byte, 512)
+		n, _ := headerCheck.Read(buf)
+		_ = headerCheck.Close()
+		contentPrefix := strings.ToUpper(string(buf[:n]))
+		if strings.Contains(contentPrefix, "#EXTM3U") || strings.Contains(contentPrefix, "#EXT-X-") {
+			logger.Log.Warn().Str("file_id", file.ID).Msg("Rejected disguised HLS playlist video input. Using fallback poster.")
+			return generateDocumentPoster(ext), nil
+		}
+	}
+
 	// Bounded execution: max 15 seconds to prevent hung processes or CPU exhaustion
 	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	// Restrict protocols to file,crypto,data to eliminate SSRF and local network access
-	cmd := exec.CommandContext(timeoutCtx, ffmpegPath,
+	// Determine explicit demuxer format based on extension to block demuxer confusion / HLS playlist parsing
+	var demuxerFormat string
+	switch ext {
+	case ".mp4", ".m4v", ".mov":
+		demuxerFormat = "mov,mp4,m4a,3gp,3g2,mj2"
+	case ".mkv", ".webm":
+		demuxerFormat = "matroska,webm"
+	case ".avi":
+		demuxerFormat = "avi"
+	}
+
+	ffmpegArgs := []string{
 		"-nostdin",
 		"-y",
 		"-protocol_whitelist", "file,crypto,data",
+	}
+	if demuxerFormat != "" {
+		ffmpegArgs = append(ffmpegArgs, "-f", demuxerFormat)
+	}
+	ffmpegArgs = append(ffmpegArgs,
 		"-ss", "00:00:01",
 		"-i", tmpInput,
 		"-frames:v", "1",
 		"-vf", "scale=300:-1",
 		tmpOutput,
 	)
+
+	cmd := exec.CommandContext(timeoutCtx, ffmpegPath, ffmpegArgs...)
 
 	if err := cmd.Run(); err != nil {
 		logger.Log.Warn().Err(err).Str("file_id", file.ID).Msg("FFmpeg frame extraction failed. Using fallback poster.")

@@ -2,8 +2,10 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -189,6 +191,15 @@ func (h *NotificationHandler) ForgotPassword(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, "Email is required")
 	}
 
+	// Rate limit: 3 forgot-password requests per 15 min per IP
+	if h.notifService != nil {
+		ip := c.RealIP()
+		rlKey := fmt.Sprintf("PushPort:rl:forgot:%s", ip)
+		if count, err := h.notifService.CheckRateLimit(c.Request().Context(), rlKey, 15*time.Minute); err == nil && count > 3 {
+			return SendError(c, http.StatusTooManyRequests, "Too many password reset requests. Please try again later.")
+		}
+	}
+
 	if err := h.notifService.ForgotPassword(c.Request().Context(), req.Email); err != nil {
 		return SendError(c, http.StatusBadRequest, err.Error())
 	}
@@ -208,6 +219,15 @@ func (h *NotificationHandler) ResetPassword(c echo.Context) error {
 	}
 	if err := c.Bind(&req); err != nil || req.Email == "" || req.OTP == "" || req.Password == "" {
 		return SendError(c, http.StatusBadRequest, "Email, OTP and password are required")
+	}
+
+	// Rate limit: 3 reset attempts per 15 min per IP
+	if h.notifService != nil {
+		ip := c.RealIP()
+		rlKey := fmt.Sprintf("PushPort:rl:reset:%s", ip)
+		if count, err := h.notifService.CheckRateLimit(c.Request().Context(), rlKey, 15*time.Minute); err == nil && count > 3 {
+			return SendError(c, http.StatusTooManyRequests, "Too many password reset attempts. Please try again later.")
+		}
 	}
 
 	if err := h.notifService.ResetPassword(c.Request().Context(), req.Email, req.OTP, req.Password); err != nil {

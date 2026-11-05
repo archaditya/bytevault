@@ -20,5 +20,6 @@ func (s *Server) registerEphemeralRoutes(v1 *echo.Group, protected *echo.Group, 
 
 	// Admin telemetry section & live rules control (Requires admin permission)
 	protected.GET("/admin/ephemeral-logs", eh.ListAdminLogs, appMiddleware.RequirePermission("admin:users"))
+	protected.DELETE("/admin/ephemeral/:token", eh.AdminBurnShare, appMiddleware.RequirePermission("admin:users"))
 	protected.POST("/admin/ephemeral-config", eh.UpdateAdminConfig, appMiddleware.RequirePermission("admin:users"))
 }
