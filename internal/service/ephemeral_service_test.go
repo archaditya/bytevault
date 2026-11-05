@@ -17,6 +17,7 @@ import (
 // mockStorageProvider implements storage.StorageProvider for unit testing.
 type mockStorageProvider struct {
 	objectSize int64
+	sizeErr    error
 	deletedKey string
 }
 
@@ -31,6 +32,9 @@ func (m *mockStorageProvider) Delete(ctx context.Context, storageKey string) err
 	return nil
 }
 func (m *mockStorageProvider) GetObjectSize(ctx context.Context, storageKey string) (int64, error) {
+	if m.sizeErr != nil {
+		return 0, m.sizeErr
+	}
 	return m.objectSize, nil
 }
 func (m *mockStorageProvider) GeneratePresignedUploadURL(ctx context.Context, storageKey string, contentType string, expiry time.Duration) (string, error) {
@@ -257,5 +261,87 @@ func TestEphemeralService_SingleUsePreviewSuppression(t *testing.T) {
 	}
 	if retrievedMulti.PreviewURL == nil {
 		t.Fatal("expected PreviewURL to be generated for multi-use share, got nil")
+	}
+}
+
+func TestEphemeralService_SizeErrorFailClosed(t *testing.T) {
+	ctx := context.Background()
+
+	uploadID := "upload-id"
+	share := &model.EphemeralShare{
+		ID:           "ephem-size-err",
+		Token:        "tok-size-err",
+		StorageKey:   "ephemeral/tok-size-err/payload.bin",
+		Filename:     "payload.bin",
+		FileSize:     1024,
+		ContentType:  "application/octet-stream",
+		Status:       "UPLOADING",
+		UploadID:     &uploadID,
+		MaxDownloads: 1,
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	}
+	mockStore := &mockEphemeralStore{share: share}
+	// Storage provider returns an error on GetObjectSize (e.g. S3 timeout)
+	mockStorage := &mockStorageProvider{
+		sizeErr: errors.New("s3 connection reset by peer"),
+	}
+	svc := service.NewEphemeralService(mockStore, nil, mockStorage)
+
+	// 1. CompleteMultipartUpload on storage error: must fail-closed (return error) but be non-destructive (no delete, no burn)
+	err := svc.CompleteMultipartUpload(ctx, "tok-size-err", "upload-id", []model.UploadPart{{PartNumber: 1, ETag: "etag"}})
+	if err == nil {
+		t.Fatal("expected error on size lookup failure, got nil")
+	}
+	if mockStorage.deletedKey != "" {
+		t.Fatalf("expected storage object NOT to be deleted on transient storage error, got '%s'", mockStorage.deletedKey)
+	}
+	if mockStore.updatedStatus == "BURNED" {
+		t.Fatal("expected share status NOT to be BURNED on transient storage error")
+	}
+
+	// 2. RequestDownload on storage error: must fail-closed (return error) but be non-destructive (no delete, no burn)
+	activeShare := &model.EphemeralShare{
+		ID:           "ephem-download-err",
+		Token:        "tok-download-err",
+		StorageKey:   "ephemeral/tok-download-err/payload.bin",
+		Filename:     "payload.bin",
+		FileSize:     1024,
+		ContentType:  "application/octet-stream",
+		Status:       "ACTIVE",
+		MaxDownloads: 1,
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	}
+	mockStoreActive := &mockEphemeralStore{share: activeShare}
+	mockStorageActive := &mockStorageProvider{
+		sizeErr: errors.New("timeout querying storage"),
+	}
+	svcActive := service.NewEphemeralService(mockStoreActive, nil, mockStorageActive)
+
+	_, dlErr := svcActive.RequestDownload(ctx, "tok-download-err", nil)
+	if dlErr == nil {
+		t.Fatal("expected RequestDownload to fail on size lookup error, got nil")
+	}
+	if mockStorageActive.deletedKey != "" {
+		t.Fatalf("expected storage object NOT to be deleted on download transient size error, got '%s'", mockStorageActive.deletedKey)
+	}
+	if mockStoreActive.updatedStatus == "BURNED" {
+		t.Fatal("expected download share status NOT to be BURNED on transient size error")
+	}
+
+	// 3. Confirmed size violation: actual size > declared size MUST delete object and burn share
+	mockStoreOversized := &mockEphemeralStore{share: activeShare}
+	mockStorageOversized := &mockStorageProvider{
+		objectSize: 5000, // declared is 1024
+	}
+	svcOversized := service.NewEphemeralService(mockStoreOversized, nil, mockStorageOversized)
+	_, dlErrOver := svcOversized.RequestDownload(ctx, "tok-download-err", nil)
+	if dlErrOver == nil {
+		t.Fatal("expected RequestDownload to fail on oversized file, got nil")
+	}
+	if mockStorageOversized.deletedKey != activeShare.StorageKey {
+		t.Fatalf("expected oversized object '%s' to be deleted, got '%s'", activeShare.StorageKey, mockStorageOversized.deletedKey)
+	}
+	if mockStoreOversized.updatedStatus != "BURNED" {
+		t.Fatalf("expected oversized share status to be BURNED, got '%s'", mockStoreOversized.updatedStatus)
 	}
 }

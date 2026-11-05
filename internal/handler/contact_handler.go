@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/archaditya/bytevault/internal/model"
@@ -11,13 +13,27 @@ import (
 
 type ContactHandler struct {
 	contactService *service.ContactService
+	notifService   *service.NotificationService
 }
 
 func NewContactHandler(contactService *service.ContactService) *ContactHandler {
 	return &ContactHandler{contactService: contactService}
 }
 
+func (h *ContactHandler) SetNotificationService(ns *service.NotificationService) {
+	h.notifService = ns
+}
+
 func (h *ContactHandler) Submit(c echo.Context) error {
+	// Rate limit: 5 contact submissions per 1 hour per IP
+	if h.notifService != nil {
+		ip := c.RealIP()
+		rlKey := fmt.Sprintf("PushPort:rl:contact:%s", ip)
+		if count, err := h.notifService.CheckRateLimit(c.Request().Context(), rlKey, 1*time.Hour); err == nil && count > 5 {
+			return SendError(c, http.StatusTooManyRequests, "Too many contact messages sent. Please try again later.")
+		}
+	}
+
 	var req struct {
 		Name    string `json:"name"`
 		Email   string `json:"email"`

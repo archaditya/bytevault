@@ -56,7 +56,7 @@ func (s *PackageService) CreatePackage(ctx context.Context, pkg *model.Package) 
 					Name:        pkg.DisplayName,
 					Amount:      pkg.PriceWithGSTPaise,
 					Currency:    pkg.Currency,
-					Description: fmt.Sprintf("ByteVault %s Tier - %d GB Storage", pkg.DisplayName, pkg.StorageLimitBytes/(1024*1024*1024)),
+					Description: fmt.Sprintf("PushPostVault %s Tier - %d GB Storage", pkg.DisplayName, pkg.StorageLimitBytes/(1024*1024*1024)),
 				},
 				Notes: map[string]string{
 					"package_name": pkg.Name,

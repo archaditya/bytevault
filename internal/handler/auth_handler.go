@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -15,6 +17,7 @@ type AuthHandler struct {
 	authService    *service.AuthService
 	userRepo       *repository.UserRepository
 	consentService *service.ConsentService
+	notifService   *service.NotificationService
 }
 
 func NewAuthHandler(authservice *service.AuthService, userRepo ...*repository.UserRepository) *AuthHandler {
@@ -30,8 +33,21 @@ func (h *AuthHandler) SetConsentService(cs *service.ConsentService) {
 	h.consentService = cs
 }
 
+func (h *AuthHandler) SetNotificationService(ns *service.NotificationService) {
+	h.notifService = ns
+}
+
 // POST /api/v1/auth/register
 func (h *AuthHandler) Register(c echo.Context) error {
+	// Rate limit: 3 registers per 1 hour per IP
+	if h.notifService != nil {
+		ip := c.RealIP()
+		rlKey := fmt.Sprintf("PushPort:rl:register:%s", ip)
+		if count, err := h.notifService.CheckRateLimit(c.Request().Context(), rlKey, 1*time.Hour); err == nil && count > 3 {
+			return SendError(c, http.StatusTooManyRequests, "Too many registration attempts. Please try again later.")
+		}
+	}
+
 	var req struct {
 		Email             string `json:"email"`
 		Password          string `json:"password"`
@@ -144,9 +160,17 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, "Email and password are required")
 	}
 
+	// Rate limit: 5 login attempts per 15 min per IP+email
+	ip := c.RealIP()
+	rlKey := fmt.Sprintf("PushPort:rl:login:%s:%s", ip, strings.ToLower(req.Email))
+	if h.notifService != nil {
+		if count, err := h.notifService.CheckRateLimit(c.Request().Context(), rlKey, 15*time.Minute); err == nil && count > 5 {
+			return SendError(c, http.StatusTooManyRequests, "Too many login attempts. Please try again later.")
+		}
+	}
+
 	// Pass user-agent and IP for session tracking
 	userAgent := c.Request().UserAgent()
-	ip := c.RealIP()
 
 	user, tokens, err := h.authService.Login(c.Request().Context(), req.Email, req.Password, &userAgent, &ip)
 	if err != nil {
@@ -161,6 +185,11 @@ func (h *AuthHandler) Login(c echo.Context) error {
 			return SendError(c, http.StatusUnauthorized, "Invalid email or password")
 		}
 		return SendError(c, http.StatusInternalServerError, fmt.Sprintf("Login failed: %v", err))
+	}
+
+	// Successful login: clear login rate limit
+	if h.notifService != nil {
+		_ = h.notifService.ClearRateLimit(c.Request().Context(), rlKey)
 	}
 
 	return SendSuccess(c, http.StatusOK, map[string]any{

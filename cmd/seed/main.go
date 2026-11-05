@@ -41,7 +41,7 @@ func main() {
 	// 2. Define admin user credentials from environment with secure fallback
 	adminEmail := os.Getenv("SEED_ADMIN_EMAIL")
 	if adminEmail == "" {
-		adminEmail = "admin@pushport.com"
+		adminEmail = "admin@pushpostvault.com"
 	}
 
 	adminPassword := os.Getenv("SEED_ADMIN_PASSWORD")

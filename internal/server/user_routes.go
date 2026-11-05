@@ -204,6 +204,11 @@ func (s *Server) registerUserRoutes(
 			return handler.SendError(c, http.StatusInternalServerError, "Failed to update password")
 		}
 
+		// Security: Invalidate all existing sessions on password update
+		if sessionRepo != nil {
+			_ = sessionRepo.DeleteAllByUserID(c.Request().Context(), userID)
+		}
+
 		return handler.SendSuccess(c, http.StatusOK, map[string]any{
 			"message": "Password changed successfully",
 		}, nil)

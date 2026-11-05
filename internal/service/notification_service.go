@@ -16,11 +16,12 @@ import (
 )
 
 type NotificationService struct {
-	queue      *queue.RedisQueue
-	notifRepo  *repository.NotificationRepository
-	verifyRepo *repository.EmailVerificationRepository
-	deviceRepo *repository.DeviceRepository
-	userRepo   *repository.UserRepository
+	queue       *queue.RedisQueue
+	notifRepo   *repository.NotificationRepository
+	verifyRepo  *repository.EmailVerificationRepository
+	deviceRepo  *repository.DeviceRepository
+	userRepo    *repository.UserRepository
+	sessionRepo *repository.SessionRepository
 }
 
 func NewNotificationService(
@@ -37,6 +38,10 @@ func NewNotificationService(
 		deviceRepo: deviceRepo,
 		userRepo:   userRepo,
 	}
+}
+
+func (s *NotificationService) SetSessionRepo(repo *repository.SessionRepository) {
+	s.sessionRepo = repo
 }
 
 // GenerateAndSendOTP creates a 6-digit code and queues the verification email job.
@@ -255,7 +260,16 @@ func (s *NotificationService) ResetPassword(ctx context.Context, email, otp, new
 	}
 
 	// Update password
-	return s.userRepo.UpdatePassword(ctx, user.ID, string(hashedBytes))
+	if err := s.userRepo.UpdatePassword(ctx, user.ID, string(hashedBytes)); err != nil {
+		return err
+	}
+
+	// Security: Invalidate all existing sessions on password reset
+	if s.sessionRepo != nil {
+		_ = s.sessionRepo.DeleteAllByUserID(ctx, user.ID)
+	}
+
+	return nil
 }
 
 // ListAllNotifications paginates all system notifications for administrators.
@@ -454,7 +468,7 @@ func (s *NotificationService) NotifySubscription(ctx context.Context, userID, ti
 					title,
 					fmt.Sprintf("Hi %s,", userName),
 					body,
-					"You received this notification regarding your ByteVault subscription.",
+					"You received this notification regarding your PushPostVault subscription.",
 				)
 				if renderErr != nil {
 					htmlBody = body
@@ -469,7 +483,7 @@ func (s *NotificationService) NotifySubscription(ctx context.Context, userID, ti
 					Payload: map[string]any{
 						"to_email":  user.Email,
 						"to_name":   userName,
-						"subject":   "ByteVault: " + title,
+						"subject":   "PushPostVault: " + title,
 						"html_body": htmlBody,
 					},
 				}
@@ -479,3 +493,32 @@ func (s *NotificationService) NotifySubscription(ctx context.Context, userID, ti
 	}
 	return nil
 }
+
+// CheckRateLimit checks and increments a rate limit key in Redis.
+func (s *NotificationService) CheckRateLimit(ctx context.Context, key string, window time.Duration) (int64, error) {
+	if s == nil || s.queue == nil {
+		return 0, nil
+	}
+	return s.queue.CheckRateLimit(ctx, key, window)
+}
+
+// ClearRateLimit deletes a rate limit key in Redis.
+func (s *NotificationService) ClearRateLimit(ctx context.Context, key string) error {
+	if s == nil || s.queue == nil {
+		return nil
+	}
+	return s.queue.ClearRateLimit(ctx, key)
+}
+
+// CheckMFARateLimit checks and increments failed MFA attempts for a user (15 min window).
+func (s *NotificationService) CheckMFARateLimit(ctx context.Context, userID string) (int64, error) {
+	key := fmt.Sprintf("PushPort:mfa_fail:%s", userID)
+	return s.CheckRateLimit(ctx, key, 15*time.Minute)
+}
+
+// ClearMFARateLimit resets the MFA rate limit counter on successful verification.
+func (s *NotificationService) ClearMFARateLimit(ctx context.Context, userID string) error {
+	key := fmt.Sprintf("PushPort:mfa_fail:%s", userID)
+	return s.ClearRateLimit(ctx, key)
+}
+

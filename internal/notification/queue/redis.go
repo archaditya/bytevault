@@ -290,14 +290,24 @@ func (q *RedisQueue) GetInviteSession(ctx context.Context, sessionToken string) 
 // Returns the current attempt count. Window is 10 minutes.
 func (q *RedisQueue) CheckPasscodeRateLimit(ctx context.Context, ip, inviteToken string) (int64, error) {
 	key := fmt.Sprintf("PushPort:passcode_limit:%s:%s", ip, inviteToken)
+	return q.CheckRateLimit(ctx, key, 10*time.Minute)
+}
+
+// CheckRateLimit atomically increments a counter for a given key and sets the expiration on the first hit.
+func (q *RedisQueue) CheckRateLimit(ctx context.Context, key string, window time.Duration) (int64, error) {
 	count, err := q.client.Incr(ctx, key).Result()
 	if err != nil {
 		return 0, err
 	}
-	// Set expiry only on first increment
 	if count == 1 {
-		q.client.Expire(ctx, key, 10*time.Minute)
+		q.client.Expire(ctx, key, window)
 	}
 	return count, nil
 }
+
+// ClearRateLimit removes the rate limit key (e.g. on successful auth).
+func (q *RedisQueue) ClearRateLimit(ctx context.Context, key string) error {
+	return q.client.Del(ctx, key).Err()
+}
+
 
