@@ -649,7 +649,7 @@ func (s *FileService) Download(ctx context.Context, fileID, userID string, inlin
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.Status != "ACTIVE" {
+	if file.Status != "READY" && file.Status != "ACTIVE" {
 		return "", nil, fmt.Errorf("file is not available for download (status: %s)", file.Status)
 	}
 
@@ -721,7 +721,7 @@ func (s *FileService) DownloadPublic(ctx context.Context, fileID string, inline 
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.Status != "ACTIVE" {
+	if file.Status != "READY" && file.Status != "ACTIVE" {
 		return "", nil, fmt.Errorf("file is not available for public download (status: %s)", file.Status)
 	}
 
@@ -875,7 +875,7 @@ func (s *FileService) GetPublicMetadata(ctx context.Context, fileID string) (*mo
 	if !s.isAccessiblePublicly(ctx, file) {
 		return nil, fmt.Errorf("unauthorized")
 	}
-	if file.Status != "ACTIVE" {
+	if file.Status != "READY" && file.Status != "ACTIVE" {
 		return nil, fmt.Errorf("file is not available (status: %s)", file.Status)
 	}
 
@@ -1303,8 +1303,8 @@ func (s *FileService) GetPublicThumbnailURL(ctx context.Context, fileID string) 
 	if !s.isAccessiblePublicly(ctx, file) {
 		return "", fmt.Errorf("unauthorized")
 	}
-	if file.Status != "ACTIVE" {
-		return "", fmt.Errorf("file is not available (status: %s)", file.Status)
+	if file.Status != "READY" && file.Status != "ACTIVE" {
+		return "", fmt.Errorf("file is not available for public thumbnail (status: %s)", file.Status)
 	}
 	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
 		return "", fmt.Errorf("thumbnail not available")
