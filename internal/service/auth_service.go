@@ -437,25 +437,21 @@ func (s *AuthService) GoogleLogin(
 		avatarURL = *reqAvatarURL
 	}
 
-	if s.userRepo == nil {
-		return nil, nil, fmt.Errorf("user repository not configured")
+	if s.userRepo == nil || s.authProviderRepo == nil {
+		return nil, nil, fmt.Errorf("user and auth provider repositories must be configured")
 	}
 
 	var user *model.User
 
 	// STEP A: Look for existing Google OAuth link in auth_providers table
-	if s.authProviderRepo != nil {
-		existingLink, linkErr := s.authProviderRepo.FindByProviderAndID(ctx, "google", googleSub)
-		if linkErr == nil && existingLink != nil {
-			// OAuth link found — fetch linked user
-			user, err = s.userRepo.FindByIDForAuth(ctx, existingLink.UserID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("linked user account not found: %w", err)
-			}
+	existingLink, linkErr := s.authProviderRepo.FindByProviderAndID(ctx, "google", googleSub)
+	if linkErr == nil && existingLink != nil {
+		// OAuth link found — fetch linked user
+		user, err = s.userRepo.FindByIDForAuth(ctx, existingLink.UserID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("linked user account not found: %w", err)
 		}
-	}
-
-	if user == nil {
+	} else {
 		// STEP B: Look up user by normalized email (case-insensitive)
 		user, err = s.userRepo.FindByEmailForAuth(ctx, normalizedEmail)
 		if err != nil {

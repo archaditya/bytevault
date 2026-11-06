@@ -182,8 +182,8 @@ func TestGoogleLogin_AudienceAndEmailVerifiedRejection(t *testing.T) {
 	})
 
 	_, _, err = unconfiguredSvc.GoogleLogin(context.Background(), "any-token", nil, nil, nil, nil, nil)
-	// Should not fail with audience error; fails only at userRepo (nil in this test)
-	if err != nil && strings.Contains(err.Error(), "missing GoogleClientID") {
-		t.Fatalf("did not expect error containing 'missing GoogleClientID', got: %v", err)
+	// Passes tokeninfo validation without audience error, fails at unconfigured repositories
+	if err == nil || !strings.Contains(err.Error(), "user and auth provider repositories must be configured") {
+		t.Fatalf("expected error containing 'user and auth provider repositories must be configured', got: %v", err)
 	}
 }
