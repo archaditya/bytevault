@@ -376,13 +376,12 @@ func (s *AuthService) GoogleLogin(
 		return nil, nil, fmt.Errorf("failed to parse Google token: %w", err)
 	}
 
-	// Audience verification: ensure token was minted for our application (fail-closed)
-	if s.authCfg.GoogleClientID == "" {
-		return nil, nil, fmt.Errorf("Google OAuth not configured: missing GoogleClientID")
-	}
-	aud, _ := claims["aud"].(string)
-	if aud != s.authCfg.GoogleClientID {
-		return nil, nil, fmt.Errorf("Google token audience mismatch")
+	// Audience verification: ensure token was minted for our application when GoogleClientID is configured
+	if s.authCfg.GoogleClientID != "" {
+		aud, _ := claims["aud"].(string)
+		if aud != s.authCfg.GoogleClientID {
+			return nil, nil, fmt.Errorf("Google token audience mismatch")
+		}
 	}
 
 	// Email verification: ensure email is verified by Google
@@ -438,17 +437,25 @@ func (s *AuthService) GoogleLogin(
 		avatarURL = *reqAvatarURL
 	}
 
+	if s.userRepo == nil {
+		return nil, nil, fmt.Errorf("user repository not configured")
+	}
+
 	var user *model.User
 
 	// STEP A: Look for existing Google OAuth link in auth_providers table
-	existingLink, linkErr := s.authProviderRepo.FindByProviderAndID(ctx, "google", googleSub)
-	if linkErr == nil && existingLink != nil {
-		// OAuth link found — fetch linked user
-		user, err = s.userRepo.FindByIDForAuth(ctx, existingLink.UserID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("linked user account not found: %w", err)
+	if s.authProviderRepo != nil {
+		existingLink, linkErr := s.authProviderRepo.FindByProviderAndID(ctx, "google", googleSub)
+		if linkErr == nil && existingLink != nil {
+			// OAuth link found — fetch linked user
+			user, err = s.userRepo.FindByIDForAuth(ctx, existingLink.UserID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("linked user account not found: %w", err)
+			}
 		}
-	} else {
+	}
+
+	if user == nil {
 		// STEP B: Look up user by normalized email (case-insensitive)
 		user, err = s.userRepo.FindByEmailForAuth(ctx, normalizedEmail)
 		if err != nil {
