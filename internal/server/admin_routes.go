@@ -44,6 +44,7 @@ func (s *Server) registerAdminRoutes(
 		moderation.GET("/stats", moderationHandler.GetModerationStats)
 		moderation.GET("/flagged", moderationHandler.ListFlaggedFiles)
 		moderation.GET("/blocked", moderationHandler.ListBlockedFiles)
+		moderation.GET("/files/:id/preview", moderationHandler.PreviewFile)
 		moderation.POST("/files/:id/approve", moderationHandler.ApproveFile)
 		moderation.POST("/files/:id/reject", moderationHandler.RejectFile)
 		moderation.GET("/users", moderationHandler.ListRestrictedUsers)
@@ -52,6 +53,11 @@ func (s *Server) registerAdminRoutes(
 		moderation.GET("/appeals", moderationHandler.ListAppeals)
 		moderation.POST("/appeals/:id/approve", moderationHandler.ApproveAppeal)
 		moderation.POST("/appeals/:id/reject", moderationHandler.RejectAppeal)
+		moderation.GET("/reports", moderationHandler.ListAbuseReports)
+		moderation.GET("/reports/:id", moderationHandler.GetAbuseReport)
+		moderation.POST("/reports/:id/takedown", moderationHandler.TakedownAbuseReport)
+		moderation.POST("/reports/:id/strike", moderationHandler.StrikeUploaderFromReport)
+		moderation.POST("/reports/:id/dismiss", moderationHandler.DismissAbuseReport)
 	}
 
 	// Subscription & Package Management

@@ -12,8 +12,9 @@ import (
 )
 
 type ContactService struct {
-	contactRepo *repository.ContactRepository
-	emailClient *email.BrevoClient
+	contactRepo  *repository.ContactRepository
+	emailClient  *email.BrevoClient
+	notifService *NotificationService
 }
 
 func NewContactService(contactRepo *repository.ContactRepository, emailClient *email.BrevoClient) *ContactService {
@@ -21,6 +22,10 @@ func NewContactService(contactRepo *repository.ContactRepository, emailClient *e
 		contactRepo: contactRepo,
 		emailClient: emailClient,
 	}
+}
+
+func (s *ContactService) SetNotificationService(ns *NotificationService) {
+	s.notifService = ns
 }
 
 func (s *ContactService) SubmitQuery(ctx context.Context, q *model.ContactQuery) error {
@@ -55,6 +60,19 @@ func (s *ContactService) SubmitQuery(ctx context.Context, q *model.ContactQuery)
 			`, tNum, name, subject, tNum)
 			_ = s.emailClient.SendGeneric(context.Background(), toEmail, name, ackSubject, body)
 		}(q.Name, q.Email, q.Subject, ticket)
+	}
+
+	// Dispatch in-app notification to all administrators
+	if s.notifService != nil {
+		go func(tNum, name, subject string) {
+			_ = s.notifService.NotifyAdmins(
+				context.Background(),
+				"admin.contact",
+				fmt.Sprintf("New Support Ticket: #%s", tNum),
+				fmt.Sprintf("From %s: %s", name, subject),
+				"/admin/contact-queries",
+			)
+		}(ticket, q.Name, q.Subject)
 	}
 
 	return nil

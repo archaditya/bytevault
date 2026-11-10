@@ -1,21 +1,43 @@
 package handler
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/repository"
+	"github.com/archaditya/bytevault/internal/service"
+	"github.com/archaditya/bytevault/internal/storage"
 )
 
-// ModerationHandler handles admin content moderation and user appeal endpoints.
+// ModerationHandler handles admin content moderation, abuse reports, and user appeal endpoints.
 type ModerationHandler struct {
-	fileRepo *repository.FileRepository
-	userRepo *repository.UserRepository
+	fileRepo     *repository.FileRepository
+	userRepo     *repository.UserRepository
+	abuseService *service.AbuseService
+	notifService *service.NotificationService
+	store        storage.StorageProvider
 }
 
 func NewModerationHandler(fileRepo *repository.FileRepository, userRepo *repository.UserRepository) *ModerationHandler {
 	return &ModerationHandler{fileRepo: fileRepo, userRepo: userRepo}
+}
+
+func (h *ModerationHandler) SetAbuseService(as *service.AbuseService) {
+	h.abuseService = as
+}
+
+func (h *ModerationHandler) SetNotificationService(ns *service.NotificationService) {
+	h.notifService = ns
+}
+
+func (h *ModerationHandler) SetStorage(st storage.StorageProvider) {
+	h.store = st
 }
 
 // --- Admin Endpoints ---
@@ -221,6 +243,18 @@ func (h *ModerationHandler) SubmitAppeal(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to submit appeal"})
 	}
 
+	if h.notifService != nil {
+		go func() {
+			_ = h.notifService.NotifyAdmins(
+				context.Background(),
+				"admin.appeal",
+				"New Moderation Appeal Submitted",
+				"A restricted user submitted an appeal for account review",
+				"/admin/moderation",
+			)
+		}()
+	}
+
 	return c.JSON(http.StatusCreated, map[string]any{
 		"status": "success",
 		"detail": "Appeal submitted successfully. An admin will review within 24-48 hours.",
@@ -267,6 +301,214 @@ func (h *ModerationHandler) GetRestrictionStatus(c echo.Context) error {
 			"restricted_until": until,
 			"reason":           reason,
 			"has_pending_appeal": hasPending,
+		},
+	})
+}
+
+// --- Abuse Report Endpoints ---
+
+// SubmitAbuseReport allows public users to report violating content. Rate limited to 5/hr per IP.
+func (h *ModerationHandler) SubmitAbuseReport(c echo.Context) error {
+	if h.abuseService == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "Abuse reporting service unavailable"})
+	}
+
+	if h.notifService != nil {
+		ip := c.RealIP()
+		rlKey := fmt.Sprintf("PushPostVault:rl:abuse:%s", ip)
+		if count, err := h.notifService.CheckRateLimit(c.Request().Context(), rlKey, 1*time.Hour); err == nil && count > 5 {
+			return c.JSON(http.StatusTooManyRequests, map[string]any{"error": "Too many abuse reports submitted. Please try again later."})
+		}
+	}
+
+	var req model.SubmitAbuseReportRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": "Invalid request body"})
+	}
+
+	report, err := h.abuseService.SubmitReport(c.Request().Context(), &req)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"status": "success",
+		"data":   report,
+	})
+}
+
+// ListAbuseReports returns paginated abuse reports for admin moderation.
+func (h *ModerationHandler) ListAbuseReports(c echo.Context) error {
+	if h.abuseService == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "Abuse reporting service unavailable"})
+	}
+
+	status := c.QueryParam("status")
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	reports, total, err := h.abuseService.ListReports(c.Request().Context(), status, limit, offset)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": "Failed to list abuse reports"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status": "success",
+		"data": map[string]any{
+			"reports": reports,
+			"pagination": map[string]any{
+				"total": total,
+				"page":  page,
+				"limit": limit,
+			},
+		},
+	})
+}
+
+// GetAbuseReport returns details for a single abuse report.
+func (h *ModerationHandler) GetAbuseReport(c echo.Context) error {
+	if h.abuseService == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "Abuse reporting service unavailable"})
+	}
+
+	id := c.Param("id")
+	report, err := h.abuseService.GetReport(c.Request().Context(), id)
+	if err != nil || report == nil {
+		return c.JSON(http.StatusNotFound, map[string]any{"error": "Abuse report not found"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status": "success",
+		"data":   report,
+	})
+}
+
+// TakedownAbuseReport actions takedown on the reported file and notifies reporter.
+func (h *ModerationHandler) TakedownAbuseReport(c echo.Context) error {
+	if h.abuseService == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "Abuse reporting service unavailable"})
+	}
+
+	id := c.Param("id")
+	adminID := c.Get("user_id").(string)
+
+	var req struct {
+		AdminNotes *string `json:"admin_notes"`
+	}
+	_ = c.Bind(&req)
+
+	if err := h.abuseService.TakedownReport(c.Request().Context(), id, req.AdminNotes, adminID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status": "success",
+		"detail": "Target file taken down and marked BLOCKED_ABUSE",
+	})
+}
+
+// StrikeUploaderFromReport takes down the file and applies a moderation strike to the uploader.
+func (h *ModerationHandler) StrikeUploaderFromReport(c echo.Context) error {
+	if h.abuseService == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "Abuse reporting service unavailable"})
+	}
+
+	id := c.Param("id")
+	adminID := c.Get("user_id").(string)
+
+	var req struct {
+		AdminNotes *string `json:"admin_notes"`
+	}
+	_ = c.Bind(&req)
+
+	strikes, err := h.abuseService.StrikeUploader(c.Request().Context(), id, req.AdminNotes, adminID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status": "success",
+		"detail": "Target file taken down and uploader strike incremented",
+		"data": map[string]any{
+			"uploader_strikes": strikes,
+		},
+	})
+}
+
+// DismissAbuseReport marks the report as dismissed with administrative notes.
+func (h *ModerationHandler) DismissAbuseReport(c echo.Context) error {
+	if h.abuseService == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": "Abuse reporting service unavailable"})
+	}
+
+	id := c.Param("id")
+	adminID := c.Get("user_id").(string)
+
+	var req struct {
+		AdminNotes *string `json:"admin_notes"`
+	}
+	_ = c.Bind(&req)
+
+	if err := h.abuseService.DismissReport(c.Request().Context(), id, req.AdminNotes, adminID); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status": "success",
+		"detail": "Abuse report dismissed",
+	})
+}
+
+// PreviewFile provides file metadata and a 1-hour presigned view URL for admin moderation inspection.
+func (h *ModerationHandler) PreviewFile(c echo.Context) error {
+	fileID := c.Param("id")
+	ctx := c.Request().Context()
+
+	file, err := h.fileRepo.FindByID(ctx, fileID)
+	if err != nil || file == nil {
+		return c.JSON(http.StatusNotFound, map[string]any{"error": "File not found"})
+	}
+
+	var previewURL string
+	if h.store != nil {
+		url, err := h.store.GeneratePresignedDownloadURL(ctx, file.StorageKey, 1*time.Hour, file.Filename, true)
+		if err == nil {
+			previewURL = url
+		}
+	}
+
+	uploaderEmail := ""
+	uploaderStrikes := 0
+	var accountCreated *time.Time
+	if h.userRepo != nil && file.UserID != "" {
+		if u, err := h.userRepo.FindByID(ctx, file.UserID); err == nil && u != nil {
+			uploaderEmail = u.Email
+			uploaderStrikes = u.NSFWStrikes
+			accountCreated = &u.CreatedAt
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"status": "success",
+		"data": map[string]any{
+			"file_id":          file.ID,
+			"filename":         file.Filename,
+			"file_size":        file.FileSize,
+			"content_type":     file.ContentType,
+			"status":           file.Status,
+			"is_public":        file.IsPublic,
+			"created_at":       file.CreatedAt,
+			"preview_url":      previewURL,
+			"uploader_email":   uploaderEmail,
+			"uploader_strikes": uploaderStrikes,
+			"account_created":  accountCreated,
 		},
 	})
 }

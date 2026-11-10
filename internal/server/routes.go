@@ -101,6 +101,7 @@ func (s *Server) registerRoutes() {
 	shareService := service.NewShareService(shareRepo, userRepo, fileRepo, folderRepo, activityRepo)
 	ephemeralService := service.NewEphemeralService(ephemeralRepo, ephemeralSettingRepo, store)
 	contactService := service.NewContactService(contactRepo, emailClient)
+	contactService.SetNotificationService(notifService)
 	consentService := service.NewConsentService(consentRepo)
 
 	// Subscription Services
@@ -140,6 +141,12 @@ func (s *Server) registerRoutes() {
 	ephemeralHandler := handler.NewEphemeralHandler(ephemeralService)
 	adminHandler := handler.NewAdminHandler(userRepo, roleRepo, sessionRepo, activityRepo, fileRepo)
 	moderationHandler := handler.NewModerationHandler(fileRepo, userRepo)
+	abuseRepo := repository.NewAbuseRepository(s.db)
+	abuseService := service.NewAbuseService(abuseRepo, fileRepo, userRepo, emailClient)
+	moderationHandler.SetAbuseService(abuseService)
+	moderationHandler.SetNotificationService(notifService)
+	moderationHandler.SetStorage(store)
+	abuseService.SetNotificationService(notifService)
 	uploadInviteHandler := handler.NewUploadInviteHandler(uploadInviteService)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 
@@ -181,6 +188,7 @@ func (s *Server) registerRoutes() {
 	s.registerNotificationRoutes(protected, notifHandler)
 	s.registerAdminRoutes(protected, adminHandler, moderationHandler, pkgHandler)
 	s.registerContactRoutes(v1, protected, contactHandler)
+	v1.POST("/report/abuse", moderationHandler.SubmitAbuseReport)
 	s.registerFileRoutes(v1, fileHandler, authMiddleware, optionalAuthMiddleware, userRepo)
 	s.registerShareRoutes(protected, shareHandler, userRepo)
 	s.registerEphemeralRoutes(v1, protected, ephemeralHandler)
@@ -202,6 +210,7 @@ func (s *Server) registerRoutes() {
 		imageLabeler := ai.NewImageLabeler(s.config.AI)
 		nsfwDetector := ai.NewNSFWDetector(s.config.AI.HFAPIToken)
 		mediaWorker := worker.NewMediaWorker(fileRepo, userRepo, store, redisQueue, imageLabeler, nsfwDetector)
+		mediaWorker.SetAdminNotifier(notifService)
 		fileHandler.SetMediaWorker(mediaWorker)
 		mediaWorker.Start(2)
 	}
