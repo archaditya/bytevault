@@ -25,6 +25,10 @@ import (
 	"github.com/archaditya/bytevault/internal/textextract"
 )
 
+type AdminNotifier interface {
+	NotifyAdmins(ctx context.Context, notifType, title, body, actionPath string) error
+}
+
 type MediaWorker struct {
 	fileRepo       *repository.FileRepository
 	userRepo       *repository.UserRepository
@@ -33,6 +37,7 @@ type MediaWorker struct {
 	malwareScanner security.MalwareScanner
 	labeler        *ai.ImageLabeler
 	nsfwDetector   *ai.NSFWDetector
+	adminNotifier  AdminNotifier
 	stopChan       chan struct{}
 }
 
@@ -47,6 +52,10 @@ func NewMediaWorker(fileRepo *repository.FileRepository, userRepo *repository.Us
 		nsfwDetector:   nsfwDetector,
 		stopChan:       make(chan struct{}),
 	}
+}
+
+func (w *MediaWorker) SetAdminNotifier(an AdminNotifier) {
+	w.adminNotifier = an
 }
 
 // Start spawns background consumer goroutines listening to Redis QueueMediaProcessing
@@ -228,6 +237,17 @@ func (w *MediaWorker) scanAndModerateNSFW(ctx context.Context, file *model.File)
 			Msg("⚠️ NSFW content FLAGGED for admin review")
 
 		_ = w.fileRepo.UpdateStatus(ctx, file.ID, "FLAGGED_REVIEW")
+		if w.adminNotifier != nil {
+			go func(fName string, sc float64) {
+				_ = w.adminNotifier.NotifyAdmins(
+					context.Background(),
+					"admin.nsfw_flagged",
+					"File Flagged by AI for Review",
+					fmt.Sprintf("File '%s' was flagged with NSFW score %.0f%%", fName, sc*100),
+					"/admin/moderation?tab=flagged",
+				)
+			}(file.Filename, result.Score)
+		}
 		return true
 	}
 

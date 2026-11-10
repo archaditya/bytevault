@@ -522,3 +522,56 @@ func (s *NotificationService) ClearMFARateLimit(ctx context.Context, userID stri
 	return s.ClearRateLimit(ctx, key)
 }
 
+// NotifyAdmins sends an in-app notification with deep-link navigation to all admin and super_admin users.
+func (s *NotificationService) NotifyAdmins(ctx context.Context, notifType, title, body, actionPath string) error {
+	if s == nil || s.userRepo == nil || s.notifRepo == nil {
+		return nil
+	}
+
+	adminIDs, _ := s.userRepo.FindUserIDsByRole(ctx, "admin")
+	superAdminIDs, _ := s.userRepo.FindUserIDsByRole(ctx, "super_admin")
+	allIDs := append(adminIDs, superAdminIDs...)
+
+	uniqueIDs := make(map[string]struct{})
+	for _, id := range allIDs {
+		if id != "" {
+			uniqueIDs[id] = struct{}{}
+		}
+	}
+
+	for id := range uniqueIDs {
+		notif := &model.Notification{
+			UserID:  id,
+			Type:    notifType,
+			Title:   title,
+			Body:    body,
+			Channel: "in_app",
+			Metadata: map[string]any{
+				"path": actionPath,
+				"type": notifType,
+			},
+		}
+		_ = s.notifRepo.Create(ctx, notif)
+
+		if s.queue != nil {
+			now := time.Now()
+			inAppJob := &queue.Job{
+				ID:        fmt.Sprintf("notif-admin-%d-%s", now.UnixNano(), id),
+				Type:      queue.JobTypeInApp,
+				UserID:    id,
+				Priority:  queue.PriorityHigh,
+				CreatedAt: now,
+				Payload: map[string]any{
+					"type":     notifType,
+					"title":    title,
+					"body":     body,
+					"metadata": map[string]any{"path": actionPath},
+				},
+			}
+			_ = s.queue.Enqueue(ctx, inAppJob)
+		}
+	}
+
+	return nil
+}
+
