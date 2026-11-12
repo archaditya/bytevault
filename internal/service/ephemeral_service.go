@@ -63,6 +63,19 @@ func (s *EphemeralService) UpdateSettings(ctx context.Context, cfg *repository.E
 	return s.settingRepo.UpdateSettings(ctx, cfg)
 }
 
+// TransitionState validates the transition against the EphemeralState state machine and updates the share status.
+func (s *EphemeralService) TransitionState(ctx context.Context, token string, nextState model.EphemeralState) error {
+	share, err := s.repo.FindByToken(ctx, token)
+	if err != nil {
+		return err
+	}
+	currentState := model.EphemeralState(share.Status)
+	if !currentState.CanTransitionTo(nextState) {
+		return fmt.Errorf("illegal ephemeral state transition from %s to %s", currentState, nextState)
+	}
+	return s.repo.UpdateStatus(ctx, token, string(nextState))
+}
+
 func (s *EphemeralService) CreateUploadSession(ctx context.Context, filename string, size int64, contentType string, password *string, ip, ua *string) (*model.EphemeralShare, string, error) {
 	// Read current system governance settings from DB
 	settings, err := s.settingRepo.GetSettings(ctx)
@@ -323,7 +336,7 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 	const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
 	if actualSize > share.FileSize || actualSize > maxAllowedLimit {
 		_ = s.storage.Delete(ctx, share.StorageKey)
-		_ = s.repo.UpdateStatus(ctx, token, "BURNED")
+		_ = s.TransitionState(ctx, token, model.EphemeralStateBurned)
 		s.progressMu.Lock()
 		delete(s.progressMap, token)
 		s.progressMu.Unlock()
@@ -334,7 +347,7 @@ func (s *EphemeralService) CompleteMultipartUpload(ctx context.Context, token st
 	delete(s.progressMap, token)
 	s.progressMu.Unlock()
 
-	return s.repo.UpdateStatus(ctx, token, "ACTIVE")
+	return s.TransitionState(ctx, token, model.EphemeralStateActive)
 }
 
 func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token string, uploadID string) error {
@@ -451,7 +464,7 @@ func (s *EphemeralService) RequestDownload(ctx context.Context, token string, pa
 	const maxAllowedLimit int64 = 2 * 1024 * 1024 * 1024
 	if actualSize > share.FileSize || actualSize > maxAllowedLimit {
 		_ = s.storage.Delete(ctx, share.StorageKey)
-		_ = s.repo.UpdateStatus(ctx, token, "BURNED")
+		_ = s.TransitionState(ctx, token, model.EphemeralStateBurned)
 		return "", fmt.Errorf("file size verification failed: object was removed")
 	}
 
@@ -511,6 +524,6 @@ func (s *EphemeralService) AdminBurnShare(ctx context.Context, token string) err
 	delete(s.progressMap, token)
 	s.progressMu.Unlock()
 
-	return s.repo.UpdateStatus(ctx, token, "BURNED")
+	return s.TransitionState(ctx, token, model.EphemeralStateBurned)
 }
 

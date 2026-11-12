@@ -410,3 +410,52 @@ func TestEphemeralService_GetMetadata_PreviewURL(t *testing.T) {
 		t.Fatalf("expected nil PreviewURL for password-protected share, got %v", resPwd.PreviewURL)
 	}
 }
+
+func TestEphemeralService_TransitionState_Validation(t *testing.T) {
+	ctx := context.Background()
+
+	share := &model.EphemeralShare{
+		Token:  "tok-fsm",
+		Status: string(model.EphemeralStateInitiated),
+	}
+	mockStore := &mockEphemeralStore{share: share}
+	svc := service.NewEphemeralService(mockStore, nil, &mockStorageProvider{})
+
+	// 1. Legal transition: INITIATED -> UPLOADING
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateUploading); err != nil {
+		t.Fatalf("expected legal transition INITIATED -> UPLOADING to succeed, got: %v", err)
+	}
+	if share.Status != string(model.EphemeralStateUploading) {
+		t.Fatalf("expected status UPLOADING, got: %s", share.Status)
+	}
+
+	// 2. Legal transition: UPLOADING -> ACTIVE
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateActive); err != nil {
+		t.Fatalf("expected legal transition UPLOADING -> ACTIVE to succeed, got: %v", err)
+	}
+
+	// 3. Legal transition: ACTIVE -> BURNED
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateBurned); err != nil {
+		t.Fatalf("expected legal transition ACTIVE -> BURNED to succeed, got: %v", err)
+	}
+
+	// 4. Illegal transition: BURNED -> ACTIVE (cannot un-burn)
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateActive); err == nil {
+		t.Fatal("expected illegal transition BURNED -> ACTIVE to fail, got nil")
+	}
+
+	// 5. Illegal transition: BURNED -> UPLOADING
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateUploading); err == nil {
+		t.Fatal("expected illegal transition BURNED -> UPLOADING to fail, got nil")
+	}
+
+	// 6. Legal transition: BURNED -> PURGED (terminal)
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStatePurged); err != nil {
+		t.Fatalf("expected legal transition BURNED -> PURGED to succeed, got: %v", err)
+	}
+
+	// 7. Illegal transition: PURGED -> anything
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateInitiated); err == nil {
+		t.Fatal("expected illegal transition PURGED -> INITIATED to fail, got nil")
+	}
+}
