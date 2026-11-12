@@ -361,6 +361,38 @@ func (s *EphemeralService) AbortMultipartUpload(ctx context.Context, token strin
 	return s.repo.DeleteByToken(ctx, token)
 }
 
+// isSupportedEphemeralPreview checks if the content type or file extension is safe and capable of in-browser preview streaming.
+func isSupportedEphemeralPreview(contentType, filename string) bool {
+	ct := strings.ToLower(contentType)
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// Video streaming (MP4, WebM, QuickTime)
+	if strings.HasPrefix(ct, "video/mp4") || strings.HasPrefix(ct, "video/webm") || strings.HasPrefix(ct, "video/quicktime") ||
+		ext == ".mp4" || ext == ".webm" || ext == ".mov" {
+		return true
+	}
+
+	// Image rendering (JPEG, PNG, WebP, GIF, SVG)
+	if strings.HasPrefix(ct, "image/jpeg") || strings.HasPrefix(ct, "image/png") || strings.HasPrefix(ct, "image/webp") ||
+		strings.HasPrefix(ct, "image/gif") || strings.HasPrefix(ct, "image/svg+xml") ||
+		ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" || ext == ".svg" {
+		return true
+	}
+
+	// Audio playback (MP3, WAV, OGG)
+	if strings.HasPrefix(ct, "audio/mpeg") || strings.HasPrefix(ct, "audio/mp3") || strings.HasPrefix(ct, "audio/wav") || strings.HasPrefix(ct, "audio/ogg") ||
+		ext == ".mp3" || ext == ".wav" || ext == ".ogg" {
+		return true
+	}
+
+	// Document viewing (PDF)
+	if strings.HasPrefix(ct, "application/pdf") || ext == ".pdf" {
+		return true
+	}
+
+	return false
+}
+
 func (s *EphemeralService) GetMetadata(ctx context.Context, token string) (*model.EphemeralShare, error) {
 	share, err := s.repo.FindByToken(ctx, token)
 	if err != nil {
@@ -377,12 +409,10 @@ func (s *EphemeralService) GetMetadata(ctx context.Context, token string) (*mode
 		}
 		s.progressMu.RUnlock()
 	}
-	// Burn-safe preview URLs: only generate preview for multi-download shares, safe image types, and <= 10MB
-	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") && share.MaxDownloads > 1 {
-		safeImg := strings.HasPrefix(share.ContentType, "image/jpeg") ||
-			strings.HasPrefix(share.ContentType, "image/png") ||
-			strings.HasPrefix(share.ContentType, "image/webp")
-		if safeImg && share.FileSize <= 10*1024*1024 {
+	// Burn-safe preview URLs: generate preview for active, unpassworded shares of supported media types <= 500MB.
+	// Both single-use (max_downloads = 1) and multi-use shares can preview before claiming/burning.
+	if share.Status == "ACTIVE" && (share.PasswordHash == nil || *share.PasswordHash == "") {
+		if isSupportedEphemeralPreview(share.ContentType, share.Filename) && share.FileSize <= 500*1024*1024 {
 			url, err := s.storage.GeneratePresignedDownloadURL(ctx, share.StorageKey, 15*time.Minute, "", true)
 			if err == nil {
 				share.PreviewURL = &url
