@@ -111,7 +111,7 @@ func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, o
 	_, _ = r.db.Exec(ctx, `
 		UPDATE ephemeral_shares 
 		SET status = 'EXPIRED' 
-		WHERE status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()
+		WHERE status IN ('ACTIVE', 'UPLOADING') AND expires_at < NOW()
 	`)
 
 	var total int
@@ -120,7 +120,7 @@ func (r *EphemeralShareRepository) ListAllForAdmin(ctx context.Context, limit, o
 	query := `
 		SELECT id, token, storage_key, filename, file_size, content_type, 
 		       CASE 
-		         WHEN status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW() THEN 'EXPIRED'
+		         WHEN status IN ('ACTIVE', 'UPLOADING') AND expires_at < NOW() THEN 'EXPIRED'
 		         ELSE status
 		       END AS status,
 		       max_downloads, download_count, ip_address, user_agent, is_live, expires_at, created_at, burned_at
@@ -153,7 +153,7 @@ func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([
 	_, _ = r.db.Exec(ctx, `
 		UPDATE ephemeral_shares 
 		SET status = 'EXPIRED' 
-		WHERE status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()
+		WHERE status IN ('ACTIVE', 'UPLOADING') AND expires_at < NOW()
 	`)
 
 	// 2. Select storage keys and upload_ids of expired or burned shares that still have physical files in R2
@@ -164,7 +164,7 @@ func (r *EphemeralShareRepository) PurgeExpiredAndBurned(ctx context.Context) ([
 		  AND storage_key != ''
 		  AND (
 		    status = 'EXPIRED' OR
-		    (status IN ('ACTIVE', 'READY', 'UPLOADING') AND expires_at < NOW()) OR
+		    (status IN ('ACTIVE', 'UPLOADING') AND expires_at < NOW()) OR
 		    (status = 'BURNED' AND (burned_at < NOW() - INTERVAL '15 minutes' OR burned_at IS NULL))
 		  )
 		LIMIT 100

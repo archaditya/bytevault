@@ -213,10 +213,10 @@ func TestEphemeralService_OversizedUploadRejectionAndPurge(t *testing.T) {
 	}
 }
 
-func TestEphemeralService_SingleUsePreviewSuppression(t *testing.T) {
+func TestEphemeralService_SingleUsePreviewAllowed(t *testing.T) {
 	ctx := context.Background()
 
-	// 1. Single-use share (MaxDownloads = 1) MUST NOT have PreviewURL
+	// 1. Single-use share (MaxDownloads = 1) CAN generate PreviewURL for streaming before download
 	singleUseShare := &model.EphemeralShare{
 		ID:           "ephem-single",
 		Token:        "tok-single",
@@ -236,8 +236,8 @@ func TestEphemeralService_SingleUsePreviewSuppression(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if retrievedSingle.PreviewURL != nil {
-		t.Fatalf("expected PreviewURL to be suppressed for single-use share, got: %s", *retrievedSingle.PreviewURL)
+	if retrievedSingle.PreviewURL == nil {
+		t.Fatal("expected PreviewURL to be available for single-use share preview streaming")
 	}
 
 	// 2. Multi-use share (MaxDownloads = 5) CAN generate PreviewURL
@@ -343,5 +343,119 @@ func TestEphemeralService_SizeErrorFailClosed(t *testing.T) {
 	}
 	if mockStoreOversized.updatedStatus != "BURNED" {
 		t.Fatalf("expected oversized share status to be BURNED, got '%s'", mockStoreOversized.updatedStatus)
+	}
+}
+
+func TestEphemeralService_GetMetadata_PreviewURL(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Single-use MP4 file <= 500MB MUST generate PreviewURL
+	mp4Share := &model.EphemeralShare{
+		Token:        "tok-video",
+		Filename:     "vacation.mp4",
+		ContentType:  "video/mp4",
+		FileSize:     150 * 1024 * 1024, // 150MB
+		Status:       "ACTIVE",
+		MaxDownloads: 1, // Single-use!
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	}
+	mockStore := &mockEphemeralStore{share: mp4Share}
+	mockStorage := &mockStorageProvider{}
+	svc := service.NewEphemeralService(mockStore, nil, mockStorage)
+
+	res, err := svc.GetMetadata(ctx, "tok-video")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.PreviewURL == nil || *res.PreviewURL != "https://mock.storage/download" {
+		t.Fatalf("expected PreviewURL to be generated for MP4 video, got %v", res.PreviewURL)
+	}
+
+	// 2. Large image (e.g. 25MB) MUST generate PreviewURL
+	imgShare := &model.EphemeralShare{
+		Token:        "tok-img",
+		Filename:     "poster.png",
+		ContentType:  "image/png",
+		FileSize:     25 * 1024 * 1024,
+		Status:       "ACTIVE",
+		MaxDownloads: 1,
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	}
+	mockStore.share = imgShare
+	resImg, err := svc.GetMetadata(ctx, "tok-img")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resImg.PreviewURL == nil {
+		t.Fatal("expected PreviewURL for 25MB image")
+	}
+
+	// 3. Password-protected share MUST NOT generate PreviewURL
+	pwd := "hashed"
+	pwdShare := &model.EphemeralShare{
+		Token:        "tok-pwd",
+		Filename:     "secret.mp4",
+		ContentType:  "video/mp4",
+		FileSize:     1024,
+		Status:       "ACTIVE",
+		PasswordHash: &pwd,
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	}
+	mockStore.share = pwdShare
+	resPwd, err := svc.GetMetadata(ctx, "tok-pwd")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resPwd.PreviewURL != nil {
+		t.Fatalf("expected nil PreviewURL for password-protected share, got %v", resPwd.PreviewURL)
+	}
+}
+
+func TestEphemeralService_TransitionState_Validation(t *testing.T) {
+	ctx := context.Background()
+
+	share := &model.EphemeralShare{
+		Token:  "tok-fsm",
+		Status: string(model.EphemeralStateInitiated),
+	}
+	mockStore := &mockEphemeralStore{share: share}
+	svc := service.NewEphemeralService(mockStore, nil, &mockStorageProvider{})
+
+	// 1. Legal transition: INITIATED -> UPLOADING
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateUploading); err != nil {
+		t.Fatalf("expected legal transition INITIATED -> UPLOADING to succeed, got: %v", err)
+	}
+	if share.Status != string(model.EphemeralStateUploading) {
+		t.Fatalf("expected status UPLOADING, got: %s", share.Status)
+	}
+
+	// 2. Legal transition: UPLOADING -> ACTIVE
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateActive); err != nil {
+		t.Fatalf("expected legal transition UPLOADING -> ACTIVE to succeed, got: %v", err)
+	}
+
+	// 3. Legal transition: ACTIVE -> BURNED
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateBurned); err != nil {
+		t.Fatalf("expected legal transition ACTIVE -> BURNED to succeed, got: %v", err)
+	}
+
+	// 4. Illegal transition: BURNED -> ACTIVE (cannot un-burn)
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateActive); err == nil {
+		t.Fatal("expected illegal transition BURNED -> ACTIVE to fail, got nil")
+	}
+
+	// 5. Illegal transition: BURNED -> UPLOADING
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateUploading); err == nil {
+		t.Fatal("expected illegal transition BURNED -> UPLOADING to fail, got nil")
+	}
+
+	// 6. Legal transition: BURNED -> PURGED (terminal)
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStatePurged); err != nil {
+		t.Fatalf("expected legal transition BURNED -> PURGED to succeed, got: %v", err)
+	}
+
+	// 7. Illegal transition: PURGED -> anything
+	if err := svc.TransitionState(ctx, "tok-fsm", model.EphemeralStateInitiated); err == nil {
+		t.Fatal("expected illegal transition PURGED -> INITIATED to fail, got nil")
 	}
 }
