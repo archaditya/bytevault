@@ -161,6 +161,7 @@ func (s *Server) registerRoutes() {
 	adminHandler.SetSettingRepository(settingRepo)
 	adminHandler.SetSubscriptionDependencies(subRepo, subService)
 	adminHandler.SetMonitoringDependencies(monitoring.GlobalTelemetry, bandwidthRepo, s.db)
+	adminHandler.SetQueue(redisQueue)
 	adminHandler.SetAuditService(auditService)
 	fileService.SetAuditService(auditService)
 

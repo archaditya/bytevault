@@ -12,6 +12,14 @@ import (
 )
 
 const maxSampleWindow = 1000
+const WindowSeconds = 60
+
+type SecondBucket struct {
+	Timestamp int64
+	Total     uint64
+	Errors5xx uint64
+	Errors4xx uint64
+}
 
 type RouteStat struct {
 	Count           uint64  `json:"count"`
@@ -29,6 +37,7 @@ type TelemetryTracker struct {
 	durations    []float64
 	durIndex     int
 	routes       map[string]*RouteStat
+	windowSlots  [WindowSeconds]SecondBucket
 }
 
 var GlobalTelemetry = NewTelemetryTracker()
@@ -53,8 +62,26 @@ func (t *TelemetryTracker) Record(route string, status int, d time.Duration) {
 		atomic.AddUint64(&t.serverErr5xx, 1)
 	}
 
+	nowSec := time.Now().Unix()
+	slotIdx := nowSec % WindowSeconds
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Update sliding window bucket
+	bucket := &t.windowSlots[slotIdx]
+	if bucket.Timestamp != nowSec {
+		bucket.Timestamp = nowSec
+		bucket.Total = 0
+		bucket.Errors5xx = 0
+		bucket.Errors4xx = 0
+	}
+	bucket.Total++
+	if status >= 500 {
+		bucket.Errors5xx++
+	} else if status >= 400 {
+		bucket.Errors4xx++
+	}
 
 	// Rolling circular buffer
 	if len(t.durations) < maxSampleWindow {
@@ -129,18 +156,20 @@ type RouteSummary struct {
 type TelemetrySnapshot struct {
 	UptimeSeconds uint64             `json:"uptime_seconds"`
 	TotalRequests uint64             `json:"total_requests"`
+	WindowRequests uint64            `json:"window_requests"`
 	Success2xx    uint64             `json:"success_2xx"`
 	ClientErr4xx  uint64             `json:"client_err_4xx"`
 	ServerErr5xx  uint64             `json:"server_err_5xx"`
 	ErrorRatePct  float64            `json:"error_rate_pct"`
 	CurrentRPS    float64            `json:"current_rps"`
+	QueueDepths   map[string]int64   `json:"queue_depths,omitempty"`
 	Latency       LatencyPercentiles `json:"latency"`
 	Resources     SystemResources    `json:"resources"`
 	Database      DBPoolStats        `json:"database"`
 	TopRoutes     []RouteSummary     `json:"top_routes"`
 }
 
-func (t *TelemetryTracker) GetSnapshot(dbPool *pgxpool.Pool) TelemetrySnapshot {
+func (t *TelemetryTracker) GetSnapshot(dbPool *pgxpool.Pool, queueDepths ...map[string]int64) TelemetrySnapshot {
 	t.mu.RLock()
 	durCopy := make([]float64, len(t.durations))
 	copy(durCopy, t.durations)
@@ -158,6 +187,17 @@ func (t *TelemetryTracker) GetSnapshot(dbPool *pgxpool.Pool) TelemetrySnapshot {
 			AvgMs:  avg,
 		})
 	}
+
+	nowSec := time.Now().Unix()
+	var windowTotal uint64
+	var window5xx uint64
+	for i := 0; i < WindowSeconds; i++ {
+		b := t.windowSlots[i]
+		if b.Timestamp > 0 && (nowSec-b.Timestamp) < WindowSeconds {
+			windowTotal += b.Total
+			window5xx += b.Errors5xx
+		}
+	}
 	t.mu.RUnlock()
 
 	uptime := uint64(time.Since(t.startTime).Seconds())
@@ -170,12 +210,24 @@ func (t *TelemetryTracker) GetSnapshot(dbPool *pgxpool.Pool) TelemetrySnapshot {
 	s4xx := atomic.LoadUint64(&t.clientErr4xx)
 	s2xx := atomic.LoadUint64(&t.success2xx)
 
+	// Rolling 60-second window RPS
+	rps := float64(windowTotal) / float64(WindowSeconds)
+	if uptime < WindowSeconds && uptime > 0 {
+		rps = float64(windowTotal) / float64(uptime)
+	}
+
+	// Rolling error rate with fallback to lifetime total
 	errRate := 0.0
-	if total > 0 {
+	if windowTotal > 0 {
+		errRate = (float64(window5xx) / float64(windowTotal)) * 100.0
+	} else if total > 0 {
 		errRate = (float64(s5xx) / float64(total)) * 100.0
 	}
 
-	rps := float64(total) / float64(uptime)
+	var qDepths map[string]int64
+	if len(queueDepths) > 0 {
+		qDepths = queueDepths[0]
+	}
 
 	// Calculate latency percentiles
 	var lat LatencyPercentiles
@@ -231,11 +283,13 @@ func (t *TelemetryTracker) GetSnapshot(dbPool *pgxpool.Pool) TelemetrySnapshot {
 	return TelemetrySnapshot{
 		UptimeSeconds: uptime,
 		TotalRequests: total,
+		WindowRequests: windowTotal,
 		Success2xx:    s2xx,
 		ClientErr4xx:  s4xx,
 		ServerErr5xx:  s5xx,
 		ErrorRatePct:  errRate,
 		CurrentRPS:    rps,
+		QueueDepths:   qDepths,
 		Latency:       lat,
 		Resources:     res,
 		Database:      dbStats,

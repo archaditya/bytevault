@@ -1,14 +1,20 @@
 package handler
 
 import (
+	"bufio"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/archaditya/bytevault/internal/model"
 	"github.com/archaditya/bytevault/internal/monitoring"
+	"github.com/archaditya/bytevault/internal/notification/queue"
 	"github.com/archaditya/bytevault/internal/repository"
 	"github.com/archaditya/bytevault/internal/service"
 )
@@ -26,6 +32,7 @@ type AdminHandler struct {
 	db            *pgxpool.Pool
 	settingRepo   *repository.SystemSettingRepository
 	auditService  *service.AuditService
+	queue         *queue.RedisQueue
 }
 
 func NewAdminHandler(
@@ -61,6 +68,10 @@ func (h *AdminHandler) SetMonitoringDependencies(telemetry *monitoring.Telemetry
 
 func (h *AdminHandler) SetSettingRepository(settingRepo *repository.SystemSettingRepository) {
 	h.settingRepo = settingRepo
+}
+
+func (h *AdminHandler) SetQueue(q *queue.RedisQueue) {
+	h.queue = q
 }
 
 // Helper to get pointer to string
@@ -432,8 +443,123 @@ func (h *AdminHandler) GetTelemetry(c echo.Context) error {
 	if h.telemetry == nil {
 		return SendError(c, http.StatusServiceUnavailable, "Telemetry tracker is not configured")
 	}
-	snapshot := h.telemetry.GetSnapshot(h.db)
+	var qDepths map[string]int64
+	if h.queue != nil {
+		qDepths = h.queue.GetQueueDepths(c.Request().Context())
+	}
+	snapshot := h.telemetry.GetSnapshot(h.db, qDepths)
 	return SendSuccess(c, http.StatusOK, snapshot, nil)
+}
+
+type LogFileInfo struct {
+	Filename  string    `json:"filename"`
+	SizeBytes int64     `json:"size_bytes"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GET /api/v1/admin/logs
+func (h *AdminHandler) ListLogFiles(c echo.Context) error {
+	const logDir = "logs"
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return SendSuccess(c, http.StatusOK, map[string]any{"files": []LogFileInfo{}}, nil)
+		}
+		return SendError(c, http.StatusInternalServerError, "Failed to inspect log directory")
+	}
+
+	var files []LogFileInfo
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, LogFileInfo{
+			Filename:  entry.Name(),
+			SizeBytes: info.Size(),
+			UpdatedAt: info.ModTime().UTC(),
+		})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].UpdatedAt.After(files[j].UpdatedAt)
+	})
+
+	return SendSuccess(c, http.StatusOK, map[string]any{"files": files}, nil)
+}
+
+// GET /api/v1/admin/logs/download?file=<filename>
+func (h *AdminHandler) DownloadLogFile(c echo.Context) error {
+	filename := c.QueryParam("file")
+	if filename == "" {
+		return SendError(c, http.StatusBadRequest, "file parameter is required")
+	}
+
+	cleanName := filepath.Base(filepath.Clean(filename))
+	if cleanName != filename || !strings.HasSuffix(cleanName, ".log") || strings.Contains(cleanName, "..") {
+		return SendError(c, http.StatusBadRequest, "Invalid or prohibited log filename")
+	}
+
+	fullPath := filepath.Join("logs", cleanName)
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		return SendError(c, http.StatusNotFound, "Log file not found")
+	}
+
+	return c.Attachment(fullPath, cleanName)
+}
+
+// GET /api/v1/admin/logs/tail?file=<filename>&lines=200
+func (h *AdminHandler) TailLogFile(c echo.Context) error {
+	filename := c.QueryParam("file")
+	if filename == "" {
+		return SendError(c, http.StatusBadRequest, "file parameter is required")
+	}
+
+	linesCount, _ := strconv.Atoi(c.QueryParam("lines"))
+	if linesCount <= 0 {
+		linesCount = 200
+	}
+	if linesCount > 2000 {
+		linesCount = 2000
+	}
+
+	cleanName := filepath.Base(filepath.Clean(filename))
+	if cleanName != filename || !strings.HasSuffix(cleanName, ".log") || strings.Contains(cleanName, "..") {
+		return SendError(c, http.StatusBadRequest, "Invalid or prohibited log filename")
+	}
+
+	fullPath := filepath.Join("logs", cleanName)
+	f, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return SendError(c, http.StatusNotFound, "Log file not found")
+		}
+		return SendError(c, http.StatusInternalServerError, "Failed to open log file")
+	}
+	defer f.Close()
+
+	var ring []string
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(ring) < linesCount {
+			ring = append(ring, line)
+		} else {
+			ring = append(ring[1:], line)
+		}
+	}
+
+	return SendSuccess(c, http.StatusOK, map[string]any{
+		"filename":    cleanName,
+		"lines":       ring,
+		"total_lines": len(ring),
+	}, nil)
 }
 
 // GET /api/v1/admin/bandwidth

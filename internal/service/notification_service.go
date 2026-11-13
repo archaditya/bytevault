@@ -287,6 +287,8 @@ func (s *NotificationService) SendAdminNotification(
 	body string,
 	channels []string,
 	priority string,
+	category string,
+	actionPath string,
 ) (int, []string, error) {
 	// 1. Resolve targeted users
 	var userIDs []string
@@ -340,6 +342,21 @@ func (s *NotificationService) SendAdminNotification(
 
 			switch ch {
 			case "in_app":
+				notifType := "admin.notification"
+				if category != "" {
+					notifType = fmt.Sprintf("admin.%s", category)
+				}
+				meta := map[string]any{
+					"priority": priority,
+					"sender":   "admin",
+				}
+				if category != "" {
+					meta["category"] = category
+				}
+				if actionPath != "" {
+					meta["path"] = actionPath
+				}
+
 				job := &queue.Job{
 					ID:        jobID,
 					Type:      queue.JobTypeInApp,
@@ -347,29 +364,31 @@ func (s *NotificationService) SendAdminNotification(
 					Priority:  priority,
 					CreatedAt: time.Now(),
 					Payload: map[string]any{
-						"type":  "admin.notification",
-						"title": title,
-						"body":  body,
-						"metadata": map[string]any{
-							"priority": priority,
-							"sender":   "admin",
-						},
+						"type":     notifType,
+						"title":    title,
+						"body":     body,
+						"metadata": meta,
 					},
 				}
 				if s.queue != nil {
 					_ = s.queue.Enqueue(ctx, job)
 				}
 			case "push":
+				pushPayload := map[string]any{
+					"title": title,
+					"body":  body,
+				}
+				if actionPath != "" {
+					pushPayload["path"] = actionPath
+				}
+
 				job := &queue.Job{
 					ID:        jobID,
 					Type:      queue.JobTypePush,
 					UserID:    uID,
 					Priority:  priority,
 					CreatedAt: time.Now(),
-					Payload: map[string]any{
-						"title": title,
-						"body":  body,
-					},
+					Payload:   pushPayload,
 				}
 				if s.queue != nil {
 					_ = s.queue.Enqueue(ctx, job)

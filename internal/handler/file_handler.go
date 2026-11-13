@@ -41,6 +41,53 @@ func (h *FileHandler) SetMediaWorker(mw *worker.MediaWorker) {
 	h.mediaWorker = mw
 }
 
+// resolveAPIKeyFolder resolves or creates a nested folder structure for API Key uploads:
+// Root: "API_Keys" -> Subfolder: {apiKeyName} -> Subpaths: {folder_path / relative paths in filename}
+func (h *FileHandler) resolveAPIKeyFolder(c echo.Context, userID, rawFilename, folderPathInput string) (*string, string) {
+	keyName := "default"
+	if k, ok := c.Get("api_key_name").(string); ok && strings.TrimSpace(k) != "" {
+		keyName = strings.TrimSpace(k)
+	}
+
+	segments := []string{"API_Keys", keyName}
+
+	// 1. Process explicit folder_path input or X-Folder-Path header
+	headerPath := c.Request().Header.Get("X-Folder-Path")
+	targetPath := folderPathInput
+	if targetPath == "" {
+		targetPath = headerPath
+	}
+	if targetPath != "" {
+		normalized := strings.ReplaceAll(targetPath, "\\", "/")
+		for _, part := range strings.Split(normalized, "/") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" && trimmed != "." {
+				segments = append(segments, trimmed)
+			}
+		}
+	}
+
+	// 2. Process any nested subpaths encoded directly inside rawFilename (e.g. "users/profile/image.png")
+	cleanFilename := rawFilename
+	if strings.Contains(rawFilename, "/") || strings.Contains(rawFilename, "\\") {
+		normalized := strings.ReplaceAll(rawFilename, "\\", "/")
+		parts := strings.Split(normalized, "/")
+		for i := 0; i < len(parts)-1; i++ {
+			if trimmed := strings.TrimSpace(parts[i]); trimmed != "" && trimmed != "." {
+				segments = append(segments, trimmed)
+			}
+		}
+		cleanFilename = parts[len(parts)-1]
+	}
+
+	if h.folderService != nil {
+		if folder, err := h.folderService.GetOrCreatePath(c.Request().Context(), userID, segments); err == nil && folder != nil {
+			return &folder.ID, cleanFilename
+		}
+	}
+
+	return nil, cleanFilename
+}
+
 // POST /api/v1/files/upload-session
 func (h *FileHandler) CreateUploadSession(c echo.Context) error {
 	userID := c.Get("user_id").(string)
@@ -57,6 +104,13 @@ func (h *FileHandler) CreateUploadSession(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" {
 		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
+	}
+
+	// Auto-organize API key uploads into nested API_Keys/{keyName}/[subpaths...]
+	if c.Get("auth_type") == "api_key" && req.FolderID == nil && h.folderService != nil {
+		resolvedFolderID, cleanName := h.resolveAPIKeyFolder(c, userID, req.Filename, "")
+		req.FolderID = resolvedFolderID
+		req.Filename = cleanName
 	}
 
 	fileMeta, uploadURL, err := h.service.CreateUploadSession(
@@ -206,20 +260,17 @@ func (h *FileHandler) Upload(c echo.Context) error {
 		folderID = &folderIDStr
 	}
 
-	// 0. Auto-organize API uploads into a folder named after the API Key (e.g. "Dev Key" or "API Uploads")
-	if c.Get("auth_type") == "api_key" && folderID == nil && h.folderService != nil {
-		folderName := "API Uploads"
-		if keyName, ok := c.Get("api_key_name").(string); ok && strings.TrimSpace(keyName) != "" {
-			folderName = strings.TrimSpace(keyName)
-		}
-		if apiKeyFolder, err := h.folderService.GetOrCreateFolder(c.Request().Context(), userID, folderName, nil); err == nil && apiKeyFolder != nil {
-			folderID = &apiKeyFolder.ID
-		}
-	}
-
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		return SendError(c, http.StatusBadRequest, "Missing file form field")
+	}
+
+	// 0. Auto-organize API uploads into nested API_Keys/{keyName}/[subpaths...]
+	if c.Get("auth_type") == "api_key" && folderID == nil && h.folderService != nil {
+		folderPathInput := c.FormValue("folder_path")
+		resolvedFolderID, cleanName := h.resolveAPIKeyFolder(c, userID, fileHeader.Filename, folderPathInput)
+		folderID = resolvedFolderID
+		fileHeader.Filename = cleanName
 	}
 
 	src, err := fileHeader.Open()
@@ -586,6 +637,13 @@ func (h *FileHandler) CreateMultipartSession(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" || req.PartCount <= 0 {
 		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
+	}
+
+	// Auto-organize API key uploads into nested API_Keys/{keyName}/[subpaths...]
+	if c.Get("auth_type") == "api_key" && req.FolderID == nil && h.folderService != nil {
+		resolvedFolderID, cleanName := h.resolveAPIKeyFolder(c, userID, req.Filename, "")
+		req.FolderID = resolvedFolderID
+		req.Filename = cleanName
 	}
 
 	fileMeta, uploadID, partURLs, err := h.service.CreateMultipartUploadSession(

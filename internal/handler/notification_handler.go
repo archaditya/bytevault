@@ -249,6 +249,8 @@ func (h *NotificationHandler) SendAdminNotification(c echo.Context) error {
 		Body       string   `json:"body" query:"body"`
 		Channels   []string `json:"channels" query:"channels"`
 		Priority   string   `json:"priority" query:"priority"`
+		Category   string   `json:"category" query:"category"`
+		Path       string   `json:"path" query:"path"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -274,6 +276,12 @@ func (h *NotificationHandler) SendAdminNotification(c echo.Context) error {
 	if req.Priority == "" {
 		req.Priority = c.QueryParam("priority")
 	}
+	if req.Category == "" {
+		req.Category = c.QueryParam("category")
+	}
+	if req.Path == "" {
+		req.Path = c.QueryParam("path")
+	}
 	if len(req.Channels) == 0 {
 		req.Channels = c.QueryParams()["channels"]
 	}
@@ -297,6 +305,8 @@ func (h *NotificationHandler) SendAdminNotification(c echo.Context) error {
 		req.Body,
 		req.Channels,
 		req.Priority,
+		req.Category,
+		req.Path,
 	)
 	if err != nil {
 		return SendError(c, http.StatusInternalServerError, err.Error())

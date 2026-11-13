@@ -310,4 +310,29 @@ func (q *RedisQueue) ClearRateLimit(ctx context.Context, key string) error {
 	return q.client.Del(ctx, key).Err()
 }
 
+// GetQueueDepths returns the current length of each active Redis queue.
+func (q *RedisQueue) GetQueueDepths(ctx context.Context) map[string]int64 {
+	depths := make(map[string]int64)
+	if q == nil || q.client == nil {
+		return depths
+	}
+
+	queues := map[string]string{
+		"email":            QueueEmail,
+		"push":             QueuePush,
+		"in_app":           QueueInApp,
+		"media_processing": QueueMediaProcessing,
+	}
+
+	for key, queueName := range queues {
+		if val, err := q.client.LLen(ctx, queueName).Result(); err == nil {
+			depths[key] = val
+		} else {
+			depths[key] = 0
+		}
+	}
+	return depths
+}
+
+
 
