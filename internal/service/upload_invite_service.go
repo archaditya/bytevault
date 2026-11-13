@@ -90,7 +90,7 @@ func sanitizeFolderName(name string) string {
 	return name
 }
 
-// ensureReceivedFolder gets or creates the root "Received" folder for the owner.
+// ensureReceivedFolder gets or creates the root "Guest Drops" folder for the owner.
 // If the folder was soft-deleted, it is re-created.
 func (s *UploadInviteService) ensureReceivedFolder(ctx context.Context, ownerID string) (*model.Folder, error) {
 	folders, err := s.folderRepo.ListByUserID(ctx, ownerID, nil)
@@ -98,19 +98,19 @@ func (s *UploadInviteService) ensureReceivedFolder(ctx context.Context, ownerID 
 		return nil, fmt.Errorf("failed to list root folders: %w", err)
 	}
 	for _, f := range folders {
-		if f.Name == "Received" {
+		if f.Name == "Guest Drops" || f.Name == "Received" {
 			return f, nil
 		}
 	}
-	// Create "Received" folder
+	// Create "Guest Drops" folder
 	folder := &model.Folder{
 		UserID:   ownerID,
-		Name:     "Received",
+		Name:     "Guest Drops",
 		ParentID: nil,
 		IsPublic: false,
 	}
 	if err := s.folderRepo.Create(ctx, folder); err != nil {
-		return nil, fmt.Errorf("failed to create Received folder: %w", err)
+		return nil, fmt.Errorf("failed to create Guest Drops folder: %w", err)
 	}
 	return folder, nil
 }

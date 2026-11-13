@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-
+	"strings"
 	"time"
 
 	"github.com/archaditya/bytevault/internal/model"
@@ -298,4 +298,26 @@ func (s *FolderService) GetOrCreateFolder(ctx context.Context, userID, name stri
 	}
 	return s.CreateFolder(ctx, userID, name, parentID)
 }
+
+// GetOrCreatePath traverses and creates a nested hierarchy of folders (e.g. ["API_Keys", "prod_key", "users"])
+// returning the terminal leaf folder.
+func (s *FolderService) GetOrCreatePath(ctx context.Context, userID string, segments []string) (*model.Folder, error) {
+	var currentParentID *string = nil
+	var currentFolder *model.Folder
+	var err error
+
+	for _, seg := range segments {
+		cleanSeg := strings.TrimSpace(seg)
+		if cleanSeg == "" {
+			continue
+		}
+		currentFolder, err = s.GetOrCreateFolder(ctx, userID, cleanSeg, currentParentID)
+		if err != nil {
+			return nil, err
+		}
+		currentParentID = &currentFolder.ID
+	}
+	return currentFolder, nil
+}
+
 
