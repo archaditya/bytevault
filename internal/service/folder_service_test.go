@@ -29,3 +29,11 @@ func TestFolderService_GetOrCreatePath_EmptySegments(t *testing.T) {
 		t.Fatalf("expected nil folder on blank segments, got: %v", folder2)
 	}
 }
+
+func TestFolderService_EnsureDefaultFolders_EmptyUserID(t *testing.T) {
+	svc := service.NewFolderService(nil, nil, nil)
+	ctx := context.Background()
+
+	// Should safely return without calling repo
+	svc.EnsureDefaultFolders(ctx, "")
+}

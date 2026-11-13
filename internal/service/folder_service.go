@@ -87,6 +87,9 @@ func (s *FolderService) ListFolders(ctx context.Context, userID string, parentID
 	if flat {
 		return s.repo.ListAllFlat(ctx, userID)
 	}
+	if parentID == nil {
+		s.EnsureDefaultFolders(ctx, userID)
+	}
 	return s.repo.ListByUserID(ctx, userID, parentID)
 }
 
@@ -318,6 +321,17 @@ func (s *FolderService) GetOrCreatePath(ctx context.Context, userID string, segm
 		currentParentID = &currentFolder.ID
 	}
 	return currentFolder, nil
+}
+
+// EnsureDefaultFolders idempotently provisions default root folders ("API_Keys", "Guest Drops") for the user.
+func (s *FolderService) EnsureDefaultFolders(ctx context.Context, userID string) {
+	if userID == "" {
+		return
+	}
+	defaultFolders := []string{"API_Keys", "Guest Drops"}
+	for _, name := range defaultFolders {
+		_, _ = s.GetOrCreateFolder(ctx, userID, name, nil)
+	}
 }
 
 
