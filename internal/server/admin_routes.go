@@ -34,6 +34,11 @@ func (s *Server) registerAdminRoutes(
 	admin.GET("/settings", adminHandler.GetSettings, appMiddleware.RequirePermission("admin:config"))
 	admin.PUT("/settings", adminHandler.UpdateSettings, appMiddleware.RequirePermission("admin:config"))
 
+	// Server Logs Inspection & Download
+	admin.GET("/logs", adminHandler.ListLogFiles, appMiddleware.RequirePermission("admin:config"))
+	admin.GET("/logs/download", adminHandler.DownloadLogFile, appMiddleware.RequirePermission("admin:config"))
+	admin.GET("/logs/tail", adminHandler.TailLogFile, appMiddleware.RequirePermission("admin:config"))
+
 	// File Inspection
 	admin.GET("/files", adminHandler.ListAllFiles, appMiddleware.RequirePermission("admin:users"))
 	admin.GET("/files/shared", adminHandler.ListSharedFiles, appMiddleware.RequirePermission("admin:users"))
