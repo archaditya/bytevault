@@ -1283,16 +1283,23 @@ func (s *FileService) GetThumbnail(ctx context.Context, fileID, userID string) (
 		return "", nil, fmt.Errorf("unauthorized")
 	}
 
-	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
-		return "", nil, fmt.Errorf("thumbnail not available")
+	if file.ThumbnailKey != nil && *file.ThumbnailKey != "" {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 30*time.Minute, "", true)
+		if err == nil {
+			return url, file, nil
+		}
 	}
 
-	url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 30*time.Minute, "", true)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to generate thumbnail presigned URL: %w", err)
+	// Fallback for image files: if dedicated thumbnail is not generated yet or failed, serve the original image payload directly
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if strings.HasPrefix(strings.ToLower(file.ContentType), "image/") || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 30*time.Minute, "", true)
+		if err == nil {
+			return url, file, nil
+		}
 	}
 
-	return url, file, nil
+	return "", nil, fmt.Errorf("thumbnail not available")
 }
 
 func (s *FileService) GetPublicThumbnailURL(ctx context.Context, fileID string) (string, error) {
@@ -1306,14 +1313,22 @@ func (s *FileService) GetPublicThumbnailURL(ctx context.Context, fileID string) 
 	if file.Status != "READY" && file.Status != "ACTIVE" {
 		return "", fmt.Errorf("file is not available for public thumbnail (status: %s)", file.Status)
 	}
-	if file.ThumbnailKey == nil || *file.ThumbnailKey == "" {
-		return "", fmt.Errorf("thumbnail not available")
+
+	if file.ThumbnailKey != nil && *file.ThumbnailKey != "" {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 1*time.Hour, "", true)
+		if err == nil {
+			return url, nil
+		}
 	}
 
-	url, err := s.storage.GeneratePresignedDownloadURL(ctx, *file.ThumbnailKey, 1*time.Hour, "", true)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate thumbnail URL: %w", err)
+	// Fallback for image files
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if strings.HasPrefix(strings.ToLower(file.ContentType), "image/") || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
+		url, err := s.storage.GeneratePresignedDownloadURL(ctx, file.StorageKey, 1*time.Hour, "", true)
+		if err == nil {
+			return url, nil
+		}
 	}
 
-	return url, nil
+	return "", fmt.Errorf("thumbnail not available")
 }
