@@ -27,7 +27,7 @@ RUN apk update && apk upgrade --no-cache && \
 COPY --from=builder /app/bytevault .
 COPY public ./public
 
-RUN chown -R appuser:appgroup /app
+RUN mkdir -p /app/logs && chown -R appuser:appgroup /app
 
 USER appuser
 
