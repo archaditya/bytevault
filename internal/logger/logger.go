@@ -87,6 +87,8 @@ func Init(env string) {
 	todayStr := time.Now().UTC().Format("02-01-2006")
 	if initF, err := fileWriter.getFile(todayStr); err == nil && initF != nil {
 		_ = initF.Sync()
+	} else if err != nil {
+		fmt.Fprintf(os.Stderr, "[LOGGER WARNING] Failed to create daily log file (%s): %v\n", todayStr, err)
 	}
 
 	var multiWriter io.Writer

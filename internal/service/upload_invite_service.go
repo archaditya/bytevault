@@ -544,11 +544,11 @@ func (s *UploadInviteService) flushSingleInviteNotification(ctx context.Context,
 	if err != nil || inv == nil || count <= 0 {
 		return err
 	}
-	s.sendBatchNotification(ctx, inv.ID, inv.OwnerID, inv.Label, inv.Token, count)
+	s.sendBatchNotification(ctx, inv.ID, inv.OwnerID, inv.Label, inv.Token, inv.TargetFolderID, count)
 	return nil
 }
 
-func (s *UploadInviteService) sendBatchNotification(ctx context.Context, inviteID, ownerID, label, token string, count int) {
+func (s *UploadInviteService) sendBatchNotification(ctx context.Context, inviteID, ownerID, label, token string, targetFolderID *string, count int) {
 	if count <= 0 {
 		return
 	}
@@ -564,6 +564,14 @@ func (s *UploadInviteService) sendBatchNotification(ctx context.Context, inviteI
 	title := fmt.Sprintf("%d new file(s) received", count)
 	body := fmt.Sprintf("You received %d new file(s) via invite \"%s\".", count, safeLabel)
 
+	// Build target redirection path
+	targetPath := "/files"
+	folderIDStr := ""
+	if targetFolderID != nil && *targetFolderID != "" {
+		folderIDStr = *targetFolderID
+		targetPath = fmt.Sprintf("/files?folder=%s", folderIDStr)
+	}
+
 	// 1. Mobile/Browser Push alert (FCM)
 	if s.redisQueue != nil {
 		pushJob := &queue.Job{
@@ -573,8 +581,10 @@ func (s *UploadInviteService) sendBatchNotification(ctx context.Context, inviteI
 			Priority:  queue.PriorityHigh,
 			CreatedAt: time.Now(),
 			Payload: map[string]any{
-				"title": title,
-				"body":  body,
+				"title":     title,
+				"body":      body,
+				"path":      targetPath,
+				"folder_id": folderIDStr,
 			},
 		}
 		_ = s.redisQueue.Enqueue(ctx, pushJob)
@@ -586,6 +596,8 @@ func (s *UploadInviteService) sendBatchNotification(ctx context.Context, inviteI
 			"invite_id": inviteID,
 			"label":     label,
 			"count":     count,
+			"folder_id": folderIDStr,
+			"path":      targetPath,
 		})
 	}
 
@@ -623,7 +635,7 @@ func (s *UploadInviteService) FlushPendingNotifications(ctx context.Context) err
 	}
 
 	for i, inv := range invites {
-		s.sendBatchNotification(ctx, inv.ID, inv.OwnerID, inv.Label, inv.Token, counts[i])
+		s.sendBatchNotification(ctx, inv.ID, inv.OwnerID, inv.Label, inv.Token, inv.TargetFolderID, counts[i])
 	}
 
 	return nil
