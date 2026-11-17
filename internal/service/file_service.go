@@ -278,7 +278,7 @@ func (s *FileService) generateStorageKey(userID, filename string) string {
 }
 
 func (s *FileService) CheckConflicts(ctx context.Context, userID string, filenames []string, folderID *string) ([]map[string]any, error) {
-	if folderID != nil && *folderID == "" {
+	if folderID != nil && (*folderID == "" || *folderID == "root") {
 		folderID = nil
 	}
 	var conflicts []map[string]any
@@ -298,6 +298,9 @@ func (s *FileService) CheckConflicts(ctx context.Context, userID string, filenam
 }
 
 func (s *FileService) ResolveNonConflictingFilename(ctx context.Context, userID, filename string, folderID *string) (string, error) {
+	if folderID != nil && (*folderID == "" || *folderID == "root") {
+		folderID = nil
+	}
 	ext := filepath.Ext(filename)
 	base := strings.TrimSuffix(filename, ext)
 	candidate := filename
@@ -397,7 +400,7 @@ func (s *FileService) CreateUploadSession(
 		return nil, "", err
 	}
 
-	if folderID != nil && *folderID == "" {
+	if folderID != nil && (*folderID == "" || *folderID == "root") {
 		folderID = nil
 	}
 
@@ -610,7 +613,7 @@ func (s *FileService) Upload(ctx context.Context, userID, filename string, size 
 		return nil, fmt.Errorf("failed upload in storage: %w", err)
 	}
 
-	if folderID != nil && *folderID == "" {
+	if folderID != nil && (*folderID == "" || *folderID == "root") {
 		folderID = nil
 	}
 
@@ -789,7 +792,7 @@ func (s *FileService) MoveFile(ctx context.Context, fileID, userID string, folde
 		return fmt.Errorf("file not found or unauthorized")
 	}
 
-	if folderID != nil && *folderID == "" {
+	if folderID != nil && (*folderID == "" || *folderID == "root") {
 		folderID = nil
 	}
 
@@ -906,7 +909,7 @@ func (s *FileService) CreateMultipartUploadSession(
 		return nil, "", nil, err
 	}
 
-	if folderID != nil && *folderID == "" {
+	if folderID != nil && (*folderID == "" || *folderID == "root") {
 		folderID = nil
 	}
 

@@ -769,7 +769,7 @@ func (r *FileRepository) GetModerationStats(ctx context.Context) (totalBlocked i
 func (r *FileRepository) FindByFilenameAndFolder(ctx context.Context, userID, filename string, folderID *string) (*model.File, error) {
 	var query string
 	var row pgx.Row
-	if folderID == nil || *folderID == "" {
+	if folderID == nil || *folderID == "" || *folderID == "root" {
 		query = `
 			SELECT id, user_id, filename, storage_provider, bucket, storage_key, thumbnail_key, file_size, content_type, is_public, status, folder_id, created_at, updated_at, downloads, tags, COALESCE(nsfw_score, 0), content_hash
 			FROM files
