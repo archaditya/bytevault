@@ -611,7 +611,7 @@ func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte,
 	return data, nil
 }
 
-// 4. Apple iWork Handler (Extracts embedded QuickLook/Thumbnail.jpg directly from ZIP container)
+// 4. Apple iWork Handler (Extracts embedded QuickLook/Thumbnail.jpg directly from ZIP container in-memory)
 func (w *MediaWorker) processAppleIWork(ctx context.Context, file *model.File) ([]byte, error) {
 	stream, err := w.storage.Download(ctx, file.StorageKey)
 	if err != nil {
@@ -619,25 +619,18 @@ func (w *MediaWorker) processAppleIWork(ctx context.Context, file *model.File) (
 	}
 	defer stream.Close()
 
-	tmpDir := os.TempDir()
-	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("iwork_%s%s", file.ID, filepath.Ext(file.Filename)))
-	outFile, err := os.Create(tmpPath)
+	// Limit to max 30MB in-memory to prevent unbounded disk/memory usage on gigantic archives
+	const maxIWorkRead = 30 * 1024 * 1024
+	buf, err := io.ReadAll(io.LimitReader(stream, maxIWorkRead))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read apple iwork archive stream: %w", err)
 	}
-	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(outFile, stream); err != nil {
-		_ = outFile.Close()
-		return nil, err
-	}
-	_ = outFile.Close()
-
-	r, err := zip.OpenReader(tmpPath)
+	readerAt := bytes.NewReader(buf)
+	r, err := zip.NewReader(readerAt, int64(len(buf)))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open apple iwork zip archive: %w", err)
 	}
-	defer r.Close()
 
 	for _, f := range r.File {
 		if strings.EqualFold(f.Name, "QuickLook/Thumbnail.jpg") || strings.EqualFold(f.Name, "preview.jpg") {
@@ -645,7 +638,8 @@ func (w *MediaWorker) processAppleIWork(ctx context.Context, file *model.File) (
 			if err != nil {
 				continue
 			}
-			data, err := io.ReadAll(rc)
+			// Cap thumbnail extraction to max 5MB
+			data, err := io.ReadAll(io.LimitReader(rc, 5*1024*1024))
 			rc.Close()
 			if err == nil && len(data) > 0 {
 				return data, nil
