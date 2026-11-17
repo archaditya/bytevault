@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"fmt"
@@ -138,6 +139,8 @@ func (w *MediaWorker) ProcessFile(ctx context.Context, fileID string) error {
 		thumbnailBytes, err = w.processVideo(ctx, file)
 	case contentType == "application/pdf" || ext == ".pdf":
 		thumbnailBytes, err = w.processPDF(ctx, file)
+	case ext == ".pages" || ext == ".key" || ext == ".numbers":
+		thumbnailBytes, err = w.processAppleIWork(ctx, file)
 	default:
 		// Non-visual files (code, JSON, data, archives, audio) use high-fidelity vector icons on the frontend
 		thumbnailBytes = nil
@@ -476,7 +479,13 @@ func (w *MediaWorker) processVideo(ctx context.Context, file *model.File) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	_, _ = io.Copy(outFile, stream)
+	// For large video files (>30MB), cap download to first 25MB to extract poster frame
+	// Fast-start MP4/MOV headers and initial keyframes reside in first 5-15MB.
+	var reader io.Reader = stream
+	if file.FileSize > 30*1024*1024 {
+		reader = io.LimitReader(stream, 25*1024*1024)
+	}
+	_, _ = io.Copy(outFile, reader)
 	_ = outFile.Close()
 
 	defer os.Remove(tmpInput)
@@ -562,7 +571,13 @@ func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	_, _ = io.Copy(outFile, stream)
+	// For large video files (>30MB), cap download to first 25MB to extract poster frame
+	// Fast-start MP4/MOV headers and initial keyframes reside in first 5-15MB.
+	var reader io.Reader = stream
+	if file.FileSize > 30*1024*1024 {
+		reader = io.LimitReader(stream, 25*1024*1024)
+	}
+	_, _ = io.Copy(outFile, reader)
 	_ = outFile.Close()
 
 	defer os.Remove(tmpInput)
@@ -594,6 +609,50 @@ func (w *MediaWorker) processPDF(ctx context.Context, file *model.File) ([]byte,
 		return generateDocumentPoster(".pdf"), nil
 	}
 	return data, nil
+}
+
+// 4. Apple iWork Handler (Extracts embedded QuickLook/Thumbnail.jpg directly from ZIP container)
+func (w *MediaWorker) processAppleIWork(ctx context.Context, file *model.File) ([]byte, error) {
+	stream, err := w.storage.Download(ctx, file.StorageKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download apple iwork file: %w", err)
+	}
+	defer stream.Close()
+
+	tmpDir := os.TempDir()
+	tmpPath := filepath.Join(tmpDir, fmt.Sprintf("iwork_%s%s", file.ID, filepath.Ext(file.Filename)))
+	outFile, err := os.Create(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(outFile, stream); err != nil {
+		_ = outFile.Close()
+		return nil, err
+	}
+	_ = outFile.Close()
+
+	r, err := zip.OpenReader(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if strings.EqualFold(f.Name, "QuickLook/Thumbnail.jpg") || strings.EqualFold(f.Name, "preview.jpg") {
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err == nil && len(data) > 0 {
+				return data, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 func resizeImageToJPEG(srcImg image.Image, maxDim int) ([]byte, error) {
