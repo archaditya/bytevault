@@ -106,6 +106,10 @@ func (h *FileHandler) CreateUploadSession(c echo.Context) error {
 		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
 	}
 
+	if req.FolderID != nil && (*req.FolderID == "" || *req.FolderID == "root") {
+		req.FolderID = nil
+	}
+
 	// Auto-organize API key uploads into nested API_Keys/{keyName}/[subpaths...]
 	if c.Get("auth_type") == "api_key" && req.FolderID == nil && h.folderService != nil {
 		resolvedFolderID, cleanName := h.resolveAPIKeyFolder(c, userID, req.Filename, "")
@@ -153,6 +157,10 @@ func (h *FileHandler) CheckConflicts(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil || len(req.Filenames) == 0 {
 		return SendError(c, http.StatusBadRequest, "filenames array is required")
+	}
+
+	if req.FolderID != nil && (*req.FolderID == "" || *req.FolderID == "root") {
+		req.FolderID = nil
 	}
 
 	conflicts, err := h.service.CheckConflicts(c.Request().Context(), userID, req.Filenames, req.FolderID)
@@ -637,6 +645,10 @@ func (h *FileHandler) CreateMultipartSession(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil || req.Filename == "" || req.FileSize <= 0 || req.ContentType == "" || req.PartCount <= 0 {
 		return SendError(c, http.StatusBadRequest, "Invalid request parameters")
+	}
+
+	if req.FolderID != nil && (*req.FolderID == "" || *req.FolderID == "root") {
+		req.FolderID = nil
 	}
 
 	// Auto-organize API key uploads into nested API_Keys/{keyName}/[subpaths...]
